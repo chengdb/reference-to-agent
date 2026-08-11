@@ -196,3 +196,69 @@ const renderOrder = computed(() => {
     </text>
   </svg>
 </template>
+
+<style>
+.radial-sectors {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  overflow: visible;
+  flex-shrink: 0;
+}
+
+.radial-sector {
+  fill: #232a4d;
+  stroke: rgba(255, 255, 255, 0.14);
+  stroke-width: 1.5;
+  cursor: pointer;
+  transition: filter 0.15s, stroke 0.15s, transform 0.15s;
+  transform-box: view-box;
+  transform-origin: var(--ox, 50%) var(--oy, 50%);
+  transform: scale(1);
+}
+
+.radial-sector:hover {
+  filter: brightness(1.3);
+  stroke: rgba(255, 255, 255, 0.75);
+  stroke-width: 2.5;
+  transform: scale(var(--k, 1.06));
+}
+
+.radial-sector.empty {
+  fill: rgba(255, 255, 255, 0.14);
+  cursor: default;
+}
+
+.radial-sector.empty:hover {
+  filter: none;
+}
+
+.radial-sector.selected {
+  stroke: var(--accent);
+  stroke-width: 2.5;
+  filter: brightness(1.35);
+}
+
+.radial-sector.selected:hover {
+  filter: brightness(1.35);
+}
+
+.radial-label {
+  fill: var(--text-2);
+  font-size: 12.5px;
+  font-weight: 600;
+  pointer-events: none;
+}
+
+.radial-icon {
+  fill: var(--text);
+  font-size: 17px;
+  pointer-events: none;
+}
+
+.radial-index {
+  fill: var(--text-3);
+  font-size: 11px;
+}
+</style>

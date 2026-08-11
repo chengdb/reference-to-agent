@@ -3,9 +3,9 @@ import { computed, onMounted, onUnmounted, ref } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import Radial from "./Radial.vue";
-import { buildMenuItems, type MenuItem } from "./menu";
-import type { MenuConfig, Recipe } from "./types";
+import Radial from "../components/ui/Radial.vue";
+import { buildMenuItems, type MenuItem } from "../utils/menu";
+import type { MenuConfig, Recipe } from "../types";
 
 const win = getCurrentWindow();
 const recipes = ref<Recipe[]>([]);
@@ -103,3 +103,65 @@ onUnmounted(() => {
     <div v-if="status" class="radial-status">{{ status }}</div>
   </div>
 </template>
+
+<style>
+.radial {
+  position: fixed;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  user-select: none;
+  overflow: hidden;
+}
+
+.radial-close {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  width: 100px;
+  height: 100px;
+  border-radius: 50%;
+  border: none;
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--text);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s, transform 0.15s;
+}
+
+.radial-close:hover {
+  background: rgba(17, 20, 29, 0.92);
+  color: var(--text-2);
+  transform: translate(-50%, -50%) scale(1.05);
+}
+
+.radial-more {
+  position: absolute;
+  bottom: 26px;
+  left: 50%;
+  transform: translateX(-50%);
+  color: var(--text-3);
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.radial-status {
+  position: absolute;
+  bottom: 50px;
+  left: 50%;
+  transform: translateX(-50%);
+  max-width: 340px;
+  padding: 6px 14px;
+  border-radius: var(--radius-pill);
+  background: rgba(245, 158, 11, 0.14);
+  border: 1px solid rgba(245, 158, 11, 0.3);
+  color: var(--yellow);
+  font-size: 12px;
+  text-align: center;
+  word-break: break-all;
+  white-space: nowrap;
+}
+</style>

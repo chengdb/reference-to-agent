@@ -1,4 +1,4 @@
-import type { MenuSlot } from "./types";
+import type { MenuSlot } from "../types";
 
 /** 圆盘上一个扇区最终的显示项：绑定的配方 + 生效的外观。 */
 export interface MenuItem {

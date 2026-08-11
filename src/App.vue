@@ -1,12 +1,12 @@
 <script setup lang="ts">
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import MenuApp from "./MenuApp.vue";
-import ConfigApp from "./ConfigApp.vue";
+import MenuWindow from "./views/MenuWindow.vue";
+import ConfigWindow from "./views/ConfigWindow.vue";
 
 const label = getCurrentWindow().label;
 </script>
 
 <template>
-  <MenuApp v-if="label === 'menu'" />
-  <ConfigApp v-else />
+  <MenuWindow v-if="label === 'menu'" />
+  <ConfigWindow v-else />
 </template>

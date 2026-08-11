@@ -1,0 +1,235 @@
+:root {
+  --bg: #0b0d14;
+  --bg-elev: #12141d;
+  --card: #171b28;
+  --card-2: #1d2231;
+  --border: rgba(255, 255, 255, 0.07);
+  --border-strong: rgba(255, 255, 255, 0.13);
+  --text: #eef2fb;
+  --text-2: #a6aec4;
+  --text-3: #6f7890;
+  --accent: #6d7cff;
+  --accent-2: #a855f7;
+  --accent-grad: linear-gradient(135deg, #6d7cff, #a855f7);
+  --green: #34d399;
+  --yellow: #fbbf24;
+  --red: #f87171;
+  --radius-lg: 18px;
+  --radius-md: 12px;
+  --radius-sm: 10px;
+  --radius-pill: 999px;
+  --shadow-card: 0 8px 24px rgba(2, 6, 23, 0.35);
+  font-family: "Segoe UI", Inter, Avenir, Helvetica, Arial, sans-serif;
+  font-size: 14px;
+  line-height: 1.5;
+  color-scheme: dark;
+  color: var(--text);
+  background-color: transparent;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+  background: transparent;
+}
+
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.12);
+  border-radius: var(--radius-pill);
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.22);
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/* ---------- 通用按钮 ---------- */
+
+.btn {
+  height: 40px;
+  padding: 0 18px;
+  border: none;
+  border-radius: var(--radius-md);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition: transform 0.12s, box-shadow 0.15s, background 0.15s;
+  white-space: nowrap;
+}
+
+.btn:active {
+  transform: translateY(1px) scale(0.98);
+}
+
+.btn-primary {
+  background: var(--accent-grad);
+  color: #fff;
+  box-shadow: 0 6px 16px rgba(124, 108, 255, 0.35);
+}
+
+.btn-primary:hover {
+  box-shadow: 0 8px 22px rgba(124, 108, 255, 0.5);
+}
+
+/* ---------- 卡片与区块 ---------- */
+
+.card {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.035), rgba(255, 255, 255, 0) 42px),
+    var(--card);
+  box-shadow: var(--shadow-card);
+  padding: 16px 18px;
+}
+
+.config-section {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.config-label {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--text-2);
+  letter-spacing: 0.3px;
+}
+
+/* ---------- 输入控件 ---------- */
+
+.config-input {
+  height: 40px;
+  padding: 0 14px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-md);
+  background: #0e1119;
+  color: var(--text);
+  font-size: 13px;
+  outline: none;
+  min-width: 0;
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+
+.config-input:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px rgba(109, 124, 255, 0.18);
+}
+
+.config-input::placeholder {
+  color: var(--text-3);
+}
+
+select.config-input {
+  cursor: pointer;
+}
+
+select.config-input option {
+  background: var(--bg-elev);
+  color: var(--text);
+}
+
+input.config-input[readonly] {
+  background: #0b0e15;
+  color: var(--text-2);
+}
+
+.config-input:disabled,
+.config-input:disabled:hover {
+  opacity: 0.55;
+  color: var(--text-3);
+  background: #0b0e15;
+  cursor: not-allowed;
+}
+
+/* ---------- 录制按钮 ---------- */
+
+.rec-btn {
+  height: 40px;
+  padding: 0 16px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-md);
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--text-2);
+  font-size: 12.5px;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.15s, border-color 0.15s, color 0.15s;
+}
+
+.rec-btn:hover {
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.rec-btn:active {
+  transform: scale(0.97);
+}
+
+.rec-btn.recording {
+  border-color: var(--accent);
+  color: var(--accent);
+  background: rgba(109, 124, 255, 0.12);
+  animation: pulse 1.2s ease-in-out infinite;
+}
+
+.rec-btn.small {
+  height: 40px;
+  padding: 0 12px;
+  font-size: 12px;
+}
+
+.pick-btn {
+  height: 40px;
+  padding: 0 14px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-md);
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--text-2);
+  font-size: 12.5px;
+  cursor: pointer;
+  white-space: nowrap;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.15s;
+}
+
+.pick-btn:hover {
+  background: rgba(255, 255, 255, 0.1);
+}
+
+@keyframes pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.72;
+  }
+}

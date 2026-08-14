@@ -12,6 +12,7 @@ const {
   coordPicking,
   selectRecipe,
   removeRecipe,
+  duplicateRecipe,
   addRecipe,
   save,
   selectStep,
@@ -37,6 +38,9 @@ const {
         @click="selectRecipe(i)"
       >
         <span class="recipe-item-name" :title="r.name">{{ r.name }}</span>
+        <button class="recipe-copy" title="复制配方" @click.stop="duplicateRecipe(i)">
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="11" height="11" rx="2" /><path d="M5 15V5a2 2 0 0 1 2-2h10" /></svg>
+        </button>
         <button class="recipe-del" title="删除配方" @click.stop="removeRecipe(i)">
           ×
         </button>
@@ -218,7 +222,7 @@ const {
 }
 
 .recipe-list-title {
-  font-size: 12px;
+  font-size: 16px;
   font-weight: 700;
   color: var(--text-3);
   padding: 2px 6px 6px;
@@ -234,13 +238,25 @@ const {
   border: 1px solid transparent;
   border-radius: 11px;
   cursor: pointer;
-  font-size: 13px;
+  font-size: 15px;
   color: var(--text-2);
   transition: background 0.15s;
 }
 
 .recipe-item:hover {
   background: rgba(255, 255, 255, 0.06);
+}
+
+/* 条目操作按钮默认隐藏，悬浮条目时淡入显示 */
+.recipe-item:not(:hover) .recipe-copy,
+.recipe-item:not(:hover) .recipe-del {
+  opacity: 0;
+  pointer-events: none;
+}
+
+.recipe-item:hover .recipe-copy,
+.recipe-item:hover .recipe-del {
+  opacity: 1;
 }
 
 .recipe-item.active {
@@ -257,10 +273,32 @@ const {
 }
 
 .recipe-del {
-  width: 22px;
-  height: 22px;
+  width: 28px;
+  height: 28px;
   border: none;
-  border-radius: 7px;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text-3);
+  font-size: 20px;
+  cursor: pointer;
+  line-height: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  transition: background 0.15s, color 0.15s, opacity 0.15s;
+}
+
+.recipe-del:hover {
+  background: rgba(248, 113, 113, 0.15);
+  color: var(--red);
+}
+
+.recipe-copy {
+  width: 28px;
+  height: 28px;
+  border: none;
+  border-radius: 8px;
   background: transparent;
   color: var(--text-3);
   font-size: 16px;
@@ -270,12 +308,16 @@ const {
   align-items: center;
   justify-content: center;
   flex-shrink: 0;
-  transition: background 0.15s, color 0.15s;
+  transition: background 0.15s, color 0.15s, opacity 0.15s;
 }
 
-.recipe-del:hover {
-  background: rgba(248, 113, 113, 0.15);
-  color: var(--red);
+.recipe-copy:hover {
+  background: rgba(109, 124, 255, 0.15);
+  color: var(--accent);
+}
+
+.recipe-copy svg {
+  display: block;
 }
 
 .recipe-add {

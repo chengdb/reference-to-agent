@@ -57,7 +57,7 @@ const { activeSection, setSection } = useConfigStore();
   border-radius: 11px;
   background: transparent;
   color: var(--text-2);
-  font-size: 13px;
+  font-size: 15px;
   font-weight: 600;
   text-align: left;
   cursor: pointer;

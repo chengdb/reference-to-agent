@@ -431,6 +431,27 @@ function addRecipe() {
   selectedStep.value = null;
 }
 
+function uniqueRecipeName(base: string) {
+  const names = new Set(cfg.recipes.map((r) => r.name));
+  if (!names.has(base)) return base;
+  let n = 2;
+  while (names.has(`${base} ${n}`)) n++;
+  return `${base} ${n}`;
+}
+
+/** 复制配方：拷贝步骤（EditableStep 字段均为值类型，展开即充分隔离），取一个不重名的新名字，并选中副本。 */
+function duplicateRecipe(i: number) {
+  const src = cfg.recipes[i];
+  if (!src) return;
+  const copy: EditableRecipe = {
+    name: uniqueRecipeName(`${src.name} 副本`),
+    steps: src.steps.map((s) => ({ ...s })),
+  };
+  cfg.recipes.splice(i + 1, 0, copy);
+  selectedIndex.value = i + 1;
+  selectedStep.value = null;
+}
+
 function removeRecipe(i: number) {
   if (!window.confirm(`删除配方“${cfg.recipes[i].name}”？`)) return;
   cfg.recipes.splice(i, 1);
@@ -659,6 +680,7 @@ export function useConfigStore() {
     setSection,
     selectRecipe,
     addRecipe,
+    duplicateRecipe,
     removeRecipe,
     selectStep,
     addStepAt,

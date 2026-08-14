@@ -1,3 +1,13 @@
+export type Base = "left" | "right" | "top" | "bottom";
+export type Unit = "percent" | "px";
+
+/** 单轴定位：从基准边向内偏移 value（单位 unit）。 */
+export interface AxisPos {
+  base: Base;
+  value: number;
+  unit: Unit;
+}
+
 export type Step =
   | { type: "wait"; ms: number }
   | { type: "hotkey"; keys: string }
@@ -6,7 +16,9 @@ export type Step =
   | { type: "setClipboard"; text: string }
   | { type: "typeText"; text: string }
   | { type: "pasteText"; text: string }
-  | { type: "runCommand"; cmd: string; args: string[] };
+  | { type: "runCommand"; cmd: string; args: string[] }
+  | { type: "click"; title: string; x: AxisPos; y: AxisPos }
+  | { type: "rollbackClipboard" };
 
 export interface Recipe {
   name: string;

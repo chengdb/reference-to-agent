@@ -122,19 +122,21 @@ onUnmounted(() => {
   width: 100px;
   height: 100px;
   border-radius: 50%;
-  border: none;
-  background: rgba(255, 255, 255, 0.08);
-  color: var(--text);
+  border: 1.5px solid rgba(255, 255, 255, 0.45);
+  background: rgba(13, 17, 28, 0.5);
+  color: #fff;
+  box-shadow: 0 4px 18px rgba(2, 6, 23, 0.35);
   display: flex;
   align-items: center;
   justify-content: center;
   cursor: pointer;
-  transition: background 0.15s, color 0.15s, transform 0.15s;
+  transition: background 0.15s, color 0.15s, transform 0.15s, border-color 0.15s;
 }
 
 .radial-close:hover {
   background: rgba(17, 20, 29, 0.92);
   color: var(--text-2);
+  border-color: rgba(255, 255, 255, 0.8);
   transform: translate(-50%, -50%) scale(1.05);
 }
 

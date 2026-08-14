@@ -9,6 +9,7 @@ const {
   selectedIndex,
   selectedStep,
   recording,
+  coordPicking,
   selectRecipe,
   removeRecipe,
   addRecipe,
@@ -19,6 +20,8 @@ const {
   moveStep,
   openPicker,
   startRecording,
+  startCoordPicking,
+  testClick,
 } = useConfigStore();
 </script>
 
@@ -104,6 +107,64 @@ const {
               <template v-else-if="step.type === 'runCommand'">
                 <input v-model="step.cmd" class="config-input step-cmd" placeholder="命令" />
                 <input v-model="step.argsText" class="config-input step-args" placeholder="参数，逗号分隔" />
+              </template>
+
+              <template v-else-if="step.type === 'click'">
+                <input
+                  v-model="step.title"
+                  class="config-input step-click-title"
+                  placeholder="目标窗口标题（模糊匹配）"
+                />
+                <div class="step-axis">
+                  <span class="step-axis-label">X</span>
+                  <select v-model="step.xBase" class="config-input step-axis-base">
+                    <option value="left">距左边</option>
+                    <option value="right">距右边</option>
+                  </select>
+                  <input
+                    v-model.number="step.xValue"
+                    type="number"
+                    step="0.01"
+                    min="0"
+                    class="config-input step-axis-num"
+                    placeholder="偏移"
+                  />
+                  <select v-model="step.xUnit" class="config-input step-axis-unit">
+                    <option value="percent">%</option>
+                    <option value="px">px</option>
+                  </select>
+                </div>
+                <div class="step-axis">
+                  <span class="step-axis-label">Y</span>
+                  <select v-model="step.yBase" class="config-input step-axis-base">
+                    <option value="top">距上边</option>
+                    <option value="bottom">距下边</option>
+                  </select>
+                  <input
+                    v-model.number="step.yValue"
+                    type="number"
+                    step="0.01"
+                    min="0"
+                    class="config-input step-axis-num"
+                    placeholder="偏移"
+                  />
+                  <select v-model="step.yUnit" class="config-input step-axis-unit">
+                    <option value="percent">%</option>
+                    <option value="px">px</option>
+                  </select>
+                </div>
+                <button
+                  class="pick-btn small"
+                  :class="{ recording: coordPicking === si }"
+                  @click="startCoordPicking(si)"
+                >
+                  {{ coordPicking === si ? "移到输入框后按 Enter…" : "拾取坐标" }}
+                </button>
+                <button class="pick-btn small" @click="testClick(si)">测试点击</button>
+              </template>
+
+              <template v-else-if="step.type === 'rollbackClipboard'">
+                <span class="step-hint">恢复为配方执行前的剪贴板内容</span>
               </template>
             </div>
             <div class="step-controls">
@@ -458,5 +519,59 @@ const {
 .step-args {
   width: 260px;
   flex-shrink: 0;
+}
+
+.step-click-title {
+  width: 200px;
+  flex-shrink: 0;
+}
+
+.step-axis {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  padding: 4px 8px;
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.step-axis-label {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--text-3);
+  width: 14px;
+}
+
+.step-axis-base {
+  width: 82px;
+  flex-shrink: 0;
+}
+
+.step-axis-num {
+  width: 76px;
+  flex-shrink: 0;
+}
+
+.step-axis-unit {
+  width: 58px;
+  flex-shrink: 0;
+}
+
+.pick-btn.small {
+  height: 34px;
+  padding: 0 10px;
+  font-size: 12px;
+}
+
+.rec-btn.recording,
+.pick-btn.recording {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.step-hint {
+  color: var(--text-3);
+  font-size: 12px;
 }
 </style>

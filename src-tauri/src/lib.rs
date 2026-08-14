@@ -10,6 +10,7 @@ use tauri::{AppHandle, Emitter, LogicalSize, Manager, PhysicalPosition, State, W
 use tauri_plugin_global_shortcut::{GlobalShortcutExt, ShortcutState};
 
 use config::{Config, MenuConfig, Recipe};
+use actions::AxisPos;
 
 struct AppState {
     config: Mutex<Config>,
@@ -163,7 +164,7 @@ fn run_recipe(app: AppHandle, state: State<AppState>, name: String) -> Result<()
     hide_menu(&app);
     if let Some(hwnd) = prev {
         if hwnd != 0 {
-            win::set_foreground(hwnd);
+            let _ = win::set_foreground(hwnd);
         }
     }
 
@@ -183,6 +184,30 @@ fn show_main_window(app: AppHandle) {
 #[tauri::command]
 fn hide_menu_window(app: AppHandle) {
     hide_menu(&app);
+}
+
+/// 拾取点击坐标结果：光标位置相对标题匹配窗口的 x/y 轴定位。
+#[derive(serde::Serialize)]
+struct ClickCoords {
+    x: AxisPos,
+    y: AxisPos,
+}
+
+/// 拾取点击坐标：返回光标位置相对标题匹配窗口的 x/y 轴定位，单位由调用方指定。
+#[tauri::command]
+fn pick_click_coords(
+    title: String,
+    x_unit: actions::Unit,
+    y_unit: actions::Unit,
+) -> Result<ClickCoords, String> {
+    let (x, y) = win::cursor_ratio_in_window(&title, x_unit, y_unit)?;
+    Ok(ClickCoords { x, y })
+}
+
+/// 按 x/y 轴定位在目标窗口内测试点击一次（供配置界面验证坐标）。
+#[tauri::command]
+fn test_click(title: String, x: AxisPos, y: AxisPos) -> Result<(), String> {
+    win::click_in_window(&title, x, y)
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -205,6 +230,8 @@ pub fn run() {
             show_main_window,
             hide_menu_window,
             list_apps,
+            pick_click_coords,
+            test_click,
         ])
         .setup(|app| {
             let app_dir = app.path().app_config_dir()?;

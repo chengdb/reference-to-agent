@@ -1,7 +1,7 @@
 import { computed, effectScope, reactive, ref, watch } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import { buildMenuItems, normalizeSlots, type MenuItem } from "../utils/menu";
-import type { AppEntry, Config, MenuConfig, MenuSlot, Step } from "../types";
+import type { AppEntry, AxisPos, Config, MenuConfig, MenuSlot, Step } from "../types";
 
 export type StepType = Step["type"];
 
@@ -17,6 +17,13 @@ export interface EditableStep {
   text?: string;
   cmd?: string;
   argsText?: string;
+  /** click 步骤：x/y 轴各自独立定位。 */
+  xBase?: "left" | "right";
+  xValue?: number;
+  xUnit?: "percent" | "px";
+  yBase?: "top" | "bottom";
+  yValue?: number;
+  yUnit?: "percent" | "px";
 }
 
 export interface EditableRecipe {
@@ -111,6 +118,7 @@ let toastTimer: number | undefined;
 const recording = ref<string | null>(null);
 const picker = ref<{ ri: number; si: number; list: AppEntry[] } | null>(null);
 const pickerSearch = ref("");
+const coordPicking = ref<number | null>(null);
 
 const filteredApps = computed(() => {
   if (!picker.value) return [];
@@ -230,6 +238,26 @@ scope.run(() => {
       if (selectedSlot.value != null && selectedSlot.value >= n) selectedSlot.value = null;
     }
   );
+  // 步骤类型切换为 click 时补齐默认字段，避免 x/y 轴字段未定义。
+  watch(
+    () =>
+      cfg.recipes.map((r) => r.steps.map((s) => s.type).join(",")).join("|"),
+    () => {
+      for (const r of cfg.recipes) {
+        for (const s of r.steps) {
+          if (s.type === "click") {
+            if (s.xBase == null) s.xBase = "left";
+            if (s.xValue == null) s.xValue = 0.5;
+            if (s.xUnit == null) s.xUnit = "percent";
+            if (s.yBase == null) s.yBase = "bottom";
+            if (s.yValue == null) s.yValue = 0.08;
+            if (s.yUnit == null) s.yUnit = "percent";
+          }
+        }
+      }
+    },
+    { immediate: true }
+  );
 });
 
 function selectStep(si: number) {
@@ -262,8 +290,35 @@ function toEditable(s: Step): EditableStep {
       e.cmd = s.cmd;
       e.argsText = s.args.join(", ");
       break;
+    case "click":
+      e.title = s.title;
+      e.xBase = s.x.base === "right" ? "right" : "left";
+      e.xValue = s.x.value;
+      e.xUnit = s.x.unit;
+      e.yBase = s.y.base === "bottom" ? "bottom" : "top";
+      e.yValue = s.y.value;
+      e.yUnit = s.y.unit;
+      break;
+    case "rollbackClipboard":
+      break;
   }
   return e;
+}
+
+/** 把 click 步骤的 x/y 轴编辑字段收敛为 AxisPos（供序列化与测试点击复用）。 */
+function clickAxisPos(e: EditableStep): { x: AxisPos; y: AxisPos } {
+  return {
+    x: {
+      base: e.xBase === "right" ? "right" : "left",
+      value: Number(e.xValue) || 0,
+      unit: e.xUnit === "px" ? "px" : "percent",
+    },
+    y: {
+      base: e.yBase === "bottom" ? "bottom" : "top",
+      value: Number(e.yValue) || 0,
+      unit: e.yUnit === "px" ? "px" : "percent",
+    },
+  };
 }
 
 function toStep(e: EditableStep): Step {
@@ -299,6 +354,10 @@ function toStep(e: EditableStep): Step {
           .map((s) => s.trim())
           .filter(Boolean),
       };
+    case "click":
+      return { type: "click", title: (e.title ?? "").trim(), ...clickAxisPos(e) };
+    case "rollbackClipboard":
+      return { type: "rollbackClipboard" };
   }
 }
 
@@ -446,6 +505,73 @@ function pickApp(app: AppEntry) {
   picker.value = null;
 }
 
+/* ---------- 点击坐标拾取 ---------- */
+
+/**
+ * 开启坐标拾取：让用户把鼠标移到目标窗口输入框上并停留，然后按下 Enter。
+ * 后端记录鼠标位置并换算为「相对目标窗口」的百分比坐标，回填到当前 click 步骤。
+ */
+function startCoordPicking(si: number) {
+  coordPicking.value = coordPicking.value === si ? null : si;
+  // 拾取与热键录制互斥：避免 Enter 同时触发坐标拾取与热键录制。
+  if (coordPicking.value != null) recording.value = null;
+}
+
+function onCoordPickKeydown(e: KeyboardEvent) {
+  if (coordPicking.value == null) return;
+  if (e.key === "Escape") {
+    coordPicking.value = null;
+    return;
+  }
+  if (e.key !== "Enter") return;
+  e.preventDefault();
+  const si = coordPicking.value;
+  const step = cfg.recipes[selectedIndex.value]?.steps[si];
+  if (!step || step.type !== "click") {
+    coordPicking.value = null;
+    return;
+  }
+  pickClickCoords(step).finally(() => {
+    coordPicking.value = null;
+  });
+}
+
+async function pickClickCoords(step: EditableStep) {
+  try {
+    const { x, y } = await invoke<{ x: AxisPos; y: AxisPos }>("pick_click_coords", {
+      title: step.title ?? "",
+      xUnit: step.xUnit === "px" ? "px" : "percent",
+      yUnit: step.yUnit === "px" ? "px" : "percent",
+    });
+    step.xBase = x.base === "right" ? "right" : "left";
+    step.xValue = x.value;
+    step.xUnit = x.unit;
+    step.yBase = y.base === "bottom" ? "bottom" : "top";
+    step.yValue = y.value;
+    step.yUnit = y.unit;
+    showToast(
+      `已拾取坐标 x=${x.base}+${(x.value * (x.unit === "percent" ? 100 : 1)).toFixed(1)}${x.unit === "percent" ? "%" : "px"}, y=${y.base}+${(y.value * (y.unit === "percent" ? 100 : 1)).toFixed(1)}${y.unit === "percent" ? "%" : "px"}`
+    );
+  } catch (e) {
+    showToast(String(e), "error");
+  }
+}
+
+/** 按当前 x/y 轴配置测试点击一次，验证坐标是否落在输入框上。 */
+async function testClick(si: number) {
+  const step = cfg.recipes[selectedIndex.value]?.steps[si];
+  if (!step || step.type !== "click") return;
+  try {
+    await invoke("test_click", {
+      title: step.title ?? "",
+      ...clickAxisPos(step),
+    });
+    showToast("已发送测试点击");
+  } catch (e) {
+    showToast(String(e), "error");
+  }
+}
+
 /* ---------- 热键录制 ---------- */
 
 function comboFromEvent(e: KeyboardEvent): string | null {
@@ -481,6 +607,8 @@ function comboFromEvent(e: KeyboardEvent): string | null {
 
 function startRecording(target: string) {
   recording.value = recording.value === target ? null : target;
+  // 录制与坐标拾取互斥（见 startCoordPicking）。
+  if (recording.value != null) coordPicking.value = null;
 }
 
 function onKeydown(e: KeyboardEvent) {
@@ -515,6 +643,7 @@ export function useConfigStore() {
     picker,
     pickerSearch,
     filteredApps,
+    coordPicking,
     current,
     orderedPreview,
     boundSlot,
@@ -538,6 +667,9 @@ export function useConfigStore() {
     openPicker,
     closePicker,
     pickApp,
+    startCoordPicking,
+    onCoordPickKeydown,
+    testClick,
     startRecording,
     onKeydown,
     onPreviewSelect,

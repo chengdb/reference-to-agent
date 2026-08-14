@@ -26,6 +26,8 @@ const options: { type: StepType; label: string }[] = [
   { type: "typeText", label: "输入文本(逐字)" },
   { type: "pasteText", label: "输入文本(粘贴)" },
   { type: "runCommand", label: "运行命令" },
+  { type: "click", label: "点击坐标" },
+  { type: "rollbackClipboard", label: "剪切板回滚" },
 ];
 
 const current = () => options.find((o) => o.type === props.modelValue);
@@ -289,5 +291,13 @@ onUnmounted(() => {
 
 .t-runCommand {
   background: #34d399;
+}
+
+.t-click {
+  background: #60a5fa;
+}
+
+.t-rollbackClipboard {
+  background: #fbbf24;
 }
 </style>

@@ -1,7 +1,15 @@
 <script setup lang="ts">
+import { ref } from "vue";
 import Radial from "../ui/Radial.vue";
 import Select from "../ui/Select.vue";
 import { useConfigStore } from "../../composables/useConfigStore";
+
+const previewBgOptions = [
+  { value: "dark", label: "暗色" },
+  { value: "light", label: "亮色" },
+  { value: "transparent", label: "透明" },
+] as const;
+const previewBg = ref<"dark" | "light" | "transparent">("dark");
 
 const {
   cfg,
@@ -59,9 +67,26 @@ const {
               :options="sectorOptions"
             />
           </div>
+
+          <div class="setting-card preview-bg-card">
+            <label>预览背景</label>
+            <div class="preview-bg-opts">
+              <button
+                v-for="opt in previewBgOptions"
+                :key="opt.value"
+                type="button"
+                class="preview-bg-opt"
+                :class="{ active: previewBg === opt.value }"
+                @click="previewBg = opt.value"
+              >
+                <span class="preview-bg-swatch" :class="`bg-${opt.value}`"></span>
+                {{ opt.label }}
+              </button>
+            </div>
+          </div>
         </div>
 
-        <div class="radial-preview">
+        <div class="radial-preview" :class="`bg-${previewBg}`">
           <Radial
             :items="orderedPreview"
             :size="cfg.menu.size"
@@ -317,6 +342,23 @@ const {
   display: flex;
   align-items: center;
   justify-content: center;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  transition: background 0.2s;
+}
+
+.radial-preview.bg-dark {
+  background: #0d1019;
+}
+
+.radial-preview.bg-light {
+  background: #e8ebf2;
+}
+
+.radial-preview.bg-transparent {
+  background-color: #161a28;
+  background-image: repeating-conic-gradient(rgba(255, 255, 255, 0.05) 0% 25%, transparent 0% 50%);
+  background-size: 22px 22px;
 }
 
 .radial-preview .radial-sectors {
@@ -324,6 +366,61 @@ const {
   height: auto;
   max-width: 100%;
   max-height: 100%;
+}
+
+.preview-bg-card {
+  width: auto;
+}
+
+.preview-bg-opts {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.preview-bg-opt {
+  height: 34px;
+  padding: 0 10px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-md);
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--text-2);
+  font-size: 12px;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background 0.15s, border-color 0.15s, color 0.15s;
+}
+
+.preview-bg-opt:hover {
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.preview-bg-opt.active {
+  border-color: var(--accent);
+  color: var(--accent);
+  background: rgba(109, 124, 255, 0.12);
+}
+
+.preview-bg-swatch {
+  width: 14px;
+  height: 14px;
+  flex-shrink: 0;
+  border-radius: 4px;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+}
+
+.preview-bg-swatch.bg-light {
+  background: #e8ebf2;
+  border-color: rgba(70, 80, 110, 0.35);
+}
+
+.preview-bg-swatch.bg-transparent {
+  border-color: rgba(255, 255, 255, 0.18);
+  background-image: repeating-conic-gradient(#3a3f52 0% 25%, #232838 0% 50%);
+  background-size: 8px 8px;
 }
 
 /* ---------- 绑定面板 ---------- */

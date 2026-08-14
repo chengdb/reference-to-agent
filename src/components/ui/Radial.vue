@@ -208,8 +208,8 @@ const renderOrder = computed(() => {
 }
 
 .radial-sector {
-  fill: #232a4d;
-  stroke: rgba(255, 255, 255, 0.14);
+  fill: var(--sector-fill, #232a4d);
+  stroke: var(--sector-stroke, rgba(255, 255, 255, 0.35));
   stroke-width: 1.5;
   cursor: pointer;
   transition: filter 0.15s, stroke 0.15s, transform 0.15s;
@@ -226,7 +226,8 @@ const renderOrder = computed(() => {
 }
 
 .radial-sector.empty {
-  fill: rgba(255, 255, 255, 0.14);
+  fill: var(--sector-empty-fill, rgba(13, 17, 30, 0.35));
+  stroke: var(--sector-empty-stroke, rgba(255, 255, 255, 0.55));
   cursor: default;
 }
 

@@ -8,14 +8,16 @@ import AppPickerDialog from "../components/config/AppPickerDialog.vue";
 import ToastMessage from "../components/config/ToastMessage.vue";
 import { useConfigStore } from "../composables/useConfigStore";
 
-const { load, save, onKeydown } = useConfigStore();
+const { load, save, onKeydown, onCoordPickKeydown } = useConfigStore();
 
 onMounted(() => {
   load();
   window.addEventListener("keydown", onKeydown, true);
+  window.addEventListener("keydown", onCoordPickKeydown, true);
 });
 onUnmounted(() => {
   window.removeEventListener("keydown", onKeydown, true);
+  window.removeEventListener("keydown", onCoordPickKeydown, true);
 });
 </script>
 

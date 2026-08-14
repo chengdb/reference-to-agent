@@ -33,8 +33,31 @@ fn is_tool_window(hwnd: isize) -> bool {
     }
 }
 
+/// 是否为置顶窗口（WS_EX_TOPMOST）。置顶窗通常不是常规主窗口，不应抢占“最近激活”的判定。
+fn is_topmost(hwnd: isize) -> bool {
+    const WS_EX_TOPMOST: isize = 0x0000_0008;
+    unsafe {
+        let ex = GetWindowLongPtrW(hwnd as HWND, GWL_EXSTYLE);
+        ex & WS_EX_TOPMOST != 0
+    }
+}
+
+/// 从按枚举（Z 序，顶层在前）顺序排列的候选里，挑出“最近激活”的一个：
+/// 优先当前前台窗口（精确命中）；其次取第一个非置顶窗口（普通主窗口即最近被带上前台的）；
+/// 都无则退而取第一个候选。空切片时各级返回 None，自然安全。
+fn pick_front_window(cands: &[isize]) -> Option<isize> {
+    let fg = current_foreground();
+    cands
+        .iter()
+        .copied()
+        .find(|&h| h == fg)
+        .or_else(|| cands.iter().copied().find(|&h| !is_topmost(h)))
+        .or_else(|| cands.first().copied())
+}
+
 /// 按标题查找目标窗口。优先级：完全相等 > 前缀匹配 > 包含匹配；忽略大小写；
-/// 跳过不可见窗口与工具窗口。返回优先级最高者，保证「聚焦应用」不误中别的窗口。
+/// 跳过不可见窗口与工具窗口。同一匹配级别有多个窗口时，优先「最近激活」的那一个
+/// （当前前台窗口 > Z 序最前的非置顶窗口），避免同标题多实例误中陈旧窗口。
 pub fn find_window_by_title(title: &str) -> Option<isize> {
     let needle = title.trim().to_lowercase();
     if needle.is_empty() {
@@ -48,10 +71,10 @@ pub fn find_window_by_title(title: &str) -> Option<isize> {
         EnumWindows(Some(collect_proc), &mut collect as *mut _ as LPARAM);
     }
 
-    // 读取每个候选的真实标题，按匹配质量排序。
-    let mut exact: Option<isize> = None;
-    let mut prefix: Option<isize> = None;
-    let mut contains: Option<isize> = None;
+    // 读取每个候选的真实标题，按匹配质量分桶；同一桶内保持枚举（Z 序）顺序。
+    let mut exact: Vec<isize> = Vec::new();
+    let mut prefix: Vec<isize> = Vec::new();
+    let mut contains: Vec<isize> = Vec::new();
     for &h in &collect.out {
         if is_tool_window(h) {
             continue;
@@ -64,14 +87,16 @@ pub fn find_window_by_title(title: &str) -> Option<isize> {
             continue;
         }
         if tl == needle {
-            exact = exact.or(Some(h));
+            exact.push(h);
         } else if tl.starts_with(&needle) {
-            prefix = prefix.or(Some(h));
+            prefix.push(h);
         } else {
-            contains = contains.or(Some(h));
+            contains.push(h);
         }
     }
-    exact.or(prefix).or(contains)
+    pick_front_window(&exact)
+        .or_else(|| pick_front_window(&prefix))
+        .or_else(|| pick_front_window(&contains))
 }
 
 /// 返回窗口所属进程 PID。
@@ -122,7 +147,8 @@ unsafe extern "system" fn collect_proc(hwnd: HWND, lparam: LPARAM) -> BOOL {
     1
 }
 
-/// 按进程 exe 路径精确匹配已打开的窗口；跳过工具窗口，多实例时优先选标题非空的顶层窗口。
+/// 按进程 exe 路径精确匹配已打开的窗口；跳过工具窗口，多实例时优先选「最近激活」的那个：
+/// 当前前台窗口 > Z 序最前（最近带上前面）的非工具窗口；工具窗口仅作兜底。
 fn find_window_by_exe(exe: &str) -> Option<isize> {
     let needle = exe.trim();
     if needle.is_empty() {
@@ -134,9 +160,9 @@ fn find_window_by_exe(exe: &str) -> Option<isize> {
         EnumWindows(Some(collect_proc), &mut data as *mut _ as LPARAM);
     }
 
-    // 先找「可见、非工具窗口、exe 精确相等」的候选。
-    let mut primary: Option<isize> = None;
-    let mut fallback: Option<isize> = None;
+    // 收集「可见、exe 精确相等」的候选，保持枚举（Z 序）顺序；工具窗口单独兜底。
+    let mut primary: Vec<isize> = Vec::new();
+    let mut fallback: Vec<isize> = Vec::new();
     for &h in &data.out {
         let matches = window_process_path(h)
             .map(|p| p.to_lowercase() == needle)
@@ -145,12 +171,12 @@ fn find_window_by_exe(exe: &str) -> Option<isize> {
             continue;
         }
         if is_tool_window(h) {
-            fallback = fallback.or(Some(h));
+            fallback.push(h);
         } else {
-            primary = primary.or(Some(h));
+            primary.push(h);
         }
     }
-    primary.or(fallback)
+    pick_front_window(&primary).or_else(|| pick_front_window(&fallback))
 }
 
 /* ---------- 已安装应用扫描（开始菜单快捷方式） ---------- */

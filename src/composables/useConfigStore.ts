@@ -1,11 +1,27 @@
 import { computed, effectScope, reactive, ref, watch } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import { buildMenuItems, normalizeSlots, type MenuItem } from "../utils/menu";
-import type { AppEntry, AxisPos, Config, MenuConfig, MenuSlot, Step } from "../types";
+import type {
+  AppEntry,
+  AxisPos,
+  CompareOp,
+  Config,
+  MenuConfig,
+  MenuSlot,
+  Step,
+} from "../types";
 
 export type StepType = Step["type"];
 
 export type Section = "basic" | "recipes" | "menu";
+
+/** 编辑用分支结构：else-if 可多个，字段宽松。 */
+export interface EditableCompareBranch {
+  op: CompareOp;
+  value: string;
+  expected: string;
+  then: EditableStep[];
+}
 
 /** 编辑用步骤结构（宽松字段，保存时按 type 归一化）。 */
 export interface EditableStep {
@@ -24,6 +40,13 @@ export interface EditableStep {
   yBase?: "top" | "bottom";
   yValue?: number;
   yUnit?: "percent" | "px";
+  /** if 分叉步骤。 */
+  op?: CompareOp;
+  value?: string;
+  expected?: string;
+  then?: EditableStep[];
+  elseIf?: EditableCompareBranch[];
+  else?: EditableStep[];
 }
 
 export interface EditableRecipe {
@@ -112,13 +135,18 @@ const cfg = reactive<{ globalHotkey: string; recipes: EditableRecipe[]; menu: Me
 const selectedIndex = ref(0);
 const activeSection = ref<Section>("menu");
 const selectedSlot = ref<number | null>(null);
-const selectedStep = ref<number | null>(null);
+/** 当前选中的步骤（对象引用，支持嵌套分支）。 */
+const selectedStep = ref<EditableStep | null>(null);
 const toast = ref<{ type: "success" | "error"; msg: string } | null>(null);
 let toastTimer: number | undefined;
-const recording = ref<string | null>(null);
-const picker = ref<{ ri: number; si: number; list: AppEntry[] } | null>(null);
+/** 热键录制目标：'global' 或 'step'（配合 recordingStep）。 */
+const recording = ref<"global" | "step" | null>(null);
+/** 正在录制热键的步骤（recording === 'step' 时有效）。 */
+const recordingStep = ref<EditableStep | null>(null);
+const picker = ref<{ step: EditableStep | null; list: AppEntry[] } | null>(null);
 const pickerSearch = ref("");
-const coordPicking = ref<number | null>(null);
+/** 正在拾取点击坐标的步骤（对象引用）。 */
+const coordPicking = ref<EditableStep | null>(null);
 
 const filteredApps = computed(() => {
   if (!picker.value) return [];
@@ -238,30 +266,61 @@ scope.run(() => {
       if (selectedSlot.value != null && selectedSlot.value >= n) selectedSlot.value = null;
     }
   );
-  // 步骤类型切换为 click 时补齐默认字段，避免 x/y 轴字段未定义。
+  // 步骤类型切换为 click / if 时补齐默认字段，避免相关字段未定义（含嵌套分支）。
   watch(
-    () =>
-      cfg.recipes.map((r) => r.steps.map((s) => s.type).join(",")).join("|"),
+    () => JSON.stringify(cfg.recipes.map((r) => stepsShape(r.steps))),
     () => {
       for (const r of cfg.recipes) {
-        for (const s of r.steps) {
-          if (s.type === "click") {
-            if (s.xBase == null) s.xBase = "left";
-            if (s.xValue == null) s.xValue = 0.5;
-            if (s.xUnit == null) s.xUnit = "percent";
-            if (s.yBase == null) s.yBase = "bottom";
-            if (s.yValue == null) s.yValue = 0.08;
-            if (s.yUnit == null) s.yUnit = "percent";
-          }
-        }
+        normalizeStepFields(r.steps);
       }
     },
     { immediate: true }
   );
 });
 
-function selectStep(si: number) {
-  selectedStep.value = si;
+/** 序列化步骤树的“形状”（仅类型与分支结构），作为 watch 触发源。 */
+function stepsShape(steps: EditableStep[]): unknown {
+  return steps.map((s) =>
+    s.type === "if"
+      ? {
+          type: s.type,
+          then: stepsShape(s.then ?? []),
+          elseIf: (s.elseIf ?? []).map((b) => b.then && stepsShape(b.then)),
+          else: stepsShape(s.else ?? []),
+        }
+      : s.type
+  );
+}
+
+/** 递归补齐 click / if 步骤的默认字段。 */
+function normalizeStepFields(steps: EditableStep[]) {
+  for (const s of steps) {
+    if (s.type === "click") {
+      if (s.xBase == null) s.xBase = "left";
+      if (s.xValue == null) s.xValue = 0.5;
+      if (s.xUnit == null) s.xUnit = "percent";
+      if (s.yBase == null) s.yBase = "bottom";
+      if (s.yValue == null) s.yValue = 0.08;
+      if (s.yUnit == null) s.yUnit = "percent";
+    } else if (s.type === "if") {
+      if (s.op == null) s.op = "eq";
+      if (s.value == null) s.value = "";
+      if (s.expected == null) s.expected = "";
+      if (s.then == null) s.then = [];
+      if (s.elseIf == null) s.elseIf = [];
+      if (s.else == null) s.else = [];
+      normalizeStepFields(s.then);
+      for (const b of s.elseIf) {
+        if (b.then == null) b.then = [];
+        normalizeStepFields(b.then);
+      }
+      normalizeStepFields(s.else);
+    }
+  }
+}
+
+function selectStep(step: EditableStep | null) {
+  selectedStep.value = step;
 }
 
 function toEditable(s: Step): EditableStep {
@@ -298,6 +357,19 @@ function toEditable(s: Step): EditableStep {
       e.yBase = s.y.base === "bottom" ? "bottom" : "top";
       e.yValue = s.y.value;
       e.yUnit = s.y.unit;
+      break;
+    case "if":
+      e.op = s.op;
+      e.value = s.value;
+      e.expected = s.expected;
+      e.then = s.then.map(toEditable);
+      e.elseIf = s.elseIf.map((b) => ({
+        op: b.op,
+        value: b.value,
+        expected: b.expected,
+        then: b.then.map(toEditable),
+      }));
+      e.else = s.else.map(toEditable);
       break;
     case "rollbackClipboard":
       break;
@@ -356,6 +428,21 @@ function toStep(e: EditableStep): Step {
       };
     case "click":
       return { type: "click", title: (e.title ?? "").trim(), ...clickAxisPos(e) };
+    case "if":
+      return {
+        type: "if",
+        op: e.op ?? "eq",
+        value: e.value ?? "",
+        expected: e.expected ?? "",
+        then: (e.then ?? []).map(toStep),
+        elseIf: (e.elseIf ?? []).map((b) => ({
+          op: b.op,
+          value: b.value,
+          expected: b.expected,
+          then: b.then.map(toStep),
+        })),
+        else: (e.else ?? []).map(toStep),
+      };
     case "rollbackClipboard":
       return { type: "rollbackClipboard" };
   }
@@ -477,35 +564,31 @@ function setSection(s: Section) {
   selectedStep.value = null;
 }
 
-function addStepAt(i: number) {
-  if (!current.value) return;
-  current.value.steps.splice(i, 0, { type: "wait", ms: 100 });
-  selectedStep.value = i;
+function addStepAt(list: EditableStep[], i: number) {
+  list.splice(i, 0, { type: "wait", ms: 100 });
+  selectedStep.value = list[i] ?? null;
 }
 
-function removeStep(si: number) {
-  if (!current.value) return;
-  current.value.steps.splice(si, 1);
+function removeStep(list: EditableStep[], i: number) {
+  list.splice(i, 1);
   selectedStep.value = null;
 }
 
-function moveStep(si: number, dir: number) {
-  if (!current.value) return;
-  const steps = current.value.steps;
-  const ni = si + dir;
-  if (ni < 0 || ni >= steps.length) return;
-  const tmp = steps[si];
-  steps[si] = steps[ni];
-  steps[ni] = tmp;
-  if (selectedStep.value === si) selectedStep.value = ni;
+function moveStep(list: EditableStep[], i: number, dir: number) {
+  const ni = i + dir;
+  if (ni < 0 || ni >= list.length) return;
+  const tmp = list[i];
+  list[i] = list[ni];
+  list[ni] = tmp;
+  selectedStep.value = list[ni];
 }
 
 /* ---------- 应用选择 ---------- */
 
-async function openPicker(si: number) {
+async function openPicker(step: EditableStep) {
   try {
     const list = await invoke<AppEntry[]>("list_apps");
-    picker.value = { ri: selectedIndex.value, si, list };
+    picker.value = { step, list };
     pickerSearch.value = "";
   } catch (e) {
     showToast(String(e), "error");
@@ -518,7 +601,7 @@ function closePicker() {
 
 function pickApp(app: AppEntry) {
   if (!picker.value) return;
-  const step = cfg.recipes[picker.value.ri]?.steps[picker.value.si];
+  const step = picker.value.step;
   if (step && (step.type === "activateApp" || step.type === "focusApp")) {
     step.title = app.name;
     step.exe = app.exe;
@@ -532,23 +615,25 @@ function pickApp(app: AppEntry) {
  * 开启坐标拾取：让用户把鼠标移到目标窗口输入框上并停留，然后按下 Enter。
  * 后端记录鼠标位置并换算为「相对目标窗口」的百分比坐标，回填到当前 click 步骤。
  */
-function startCoordPicking(si: number) {
-  coordPicking.value = coordPicking.value === si ? null : si;
+function startCoordPicking(step: EditableStep) {
+  coordPicking.value = coordPicking.value === step ? null : step;
   // 拾取与热键录制互斥：避免 Enter 同时触发坐标拾取与热键录制。
-  if (coordPicking.value != null) recording.value = null;
+  if (coordPicking.value != null) {
+    recording.value = null;
+    recordingStep.value = null;
+  }
 }
 
 function onCoordPickKeydown(e: KeyboardEvent) {
-  if (coordPicking.value == null) return;
+  const step = coordPicking.value;
+  if (step == null) return;
   if (e.key === "Escape") {
     coordPicking.value = null;
     return;
   }
   if (e.key !== "Enter") return;
   e.preventDefault();
-  const si = coordPicking.value;
-  const step = cfg.recipes[selectedIndex.value]?.steps[si];
-  if (!step || step.type !== "click") {
+  if (step.type !== "click") {
     coordPicking.value = null;
     return;
   }
@@ -579,8 +664,7 @@ async function pickClickCoords(step: EditableStep) {
 }
 
 /** 按当前 x/y 轴配置测试点击一次，验证坐标是否落在输入框上。 */
-async function testClick(si: number) {
-  const step = cfg.recipes[selectedIndex.value]?.steps[si];
+async function testClick(step: EditableStep) {
   if (!step || step.type !== "click") return;
   try {
     await invoke("test_click", {
@@ -588,6 +672,22 @@ async function testClick(si: number) {
       ...clickAxisPos(step),
     });
     showToast("已发送测试点击");
+  } catch (e) {
+    showToast(String(e), "error");
+  }
+}
+
+/** 查询标题匹配窗口的真实标题，用于验证聚焦/激活步骤的目标是否匹配正确。 */
+async function getWindowInfo(step: EditableStep) {
+  if (!step || (step.type !== "activateApp" && step.type !== "focusApp")) return;
+  const title = (step.title ?? "").trim();
+  if (!title) {
+    showToast("请先填写窗口标题", "error");
+    return;
+  }
+  try {
+    const realTitle = await invoke<string>("get_window_info", { title });
+    showToast(`已匹配窗口标题：${realTitle}`);
   } catch (e) {
     showToast(String(e), "error");
   }
@@ -626,8 +726,17 @@ function comboFromEvent(e: KeyboardEvent): string | null {
   return null;
 }
 
-function startRecording(target: string) {
-  recording.value = recording.value === target ? null : target;
+/** 开启热键录制：target 传 'global' 录制全局热键，传步骤对象录制该步骤的 keys。 */
+function startRecording(target: "global" | EditableStep) {
+  const currently = recording.value;
+  if (target === "global") {
+    recording.value = currently === "global" ? null : "global";
+    recordingStep.value = null;
+  } else {
+    const isSame = recording.value === "step" && recordingStep.value === target;
+    recording.value = isSame ? null : "step";
+    recordingStep.value = isSame ? null : target;
+  }
   // 录制与坐标拾取互斥（见 startCoordPicking）。
   if (recording.value != null) coordPicking.value = null;
 }
@@ -638,18 +747,19 @@ function onKeydown(e: KeyboardEvent) {
   e.stopPropagation();
   if (e.key === "Escape") {
     recording.value = null;
+    recordingStep.value = null;
     return;
   }
   const combo = comboFromEvent(e);
   if (!combo) return;
   if (recording.value === "global") {
     cfg.globalHotkey = combo;
-  } else if (recording.value.startsWith("step:")) {
-    const si = Number(recording.value.slice(5));
-    const step = cfg.recipes[selectedIndex.value]?.steps[si];
+  } else if (recording.value === "step") {
+    const step = recordingStep.value;
     if (step && step.type === "hotkey") step.keys = combo;
   }
   recording.value = null;
+  recordingStep.value = null;
 }
 
 export function useConfigStore() {
@@ -661,6 +771,7 @@ export function useConfigStore() {
     selectedStep,
     toast,
     recording,
+    recordingStep,
     picker,
     pickerSearch,
     filteredApps,
@@ -692,6 +803,7 @@ export function useConfigStore() {
     startCoordPicking,
     onCoordPickKeydown,
     testClick,
+    getWindowInfo,
     startRecording,
     onKeydown,
     onPreviewSelect,

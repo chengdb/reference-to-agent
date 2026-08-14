@@ -210,6 +210,14 @@ fn test_click(title: String, x: AxisPos, y: AxisPos) -> Result<(), String> {
     win::click_in_window(&title, x, y)
 }
 
+/// 查询标题匹配窗口的真实标题（不聚焦、不启动）。未找到匹配窗口则报错。
+#[tauri::command]
+fn get_window_info(title: String) -> Result<String, String> {
+    win::find_window_by_title(&title)
+        .and_then(win::window_title)
+        .ok_or_else(|| format!("未找到“{title}”对应的窗口"))
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -232,6 +240,7 @@ pub fn run() {
             list_apps,
             pick_click_coords,
             test_click,
+            get_window_info,
         ])
         .setup(|app| {
             let app_dir = app.path().app_config_dir()?;

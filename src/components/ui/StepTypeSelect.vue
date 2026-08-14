@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { nextTick, onMounted, onUnmounted, reactive, ref } from "vue";
+import { useDropdown } from "../../composables/useDropdown";
 import type { Step } from "../../types";
 
 type StepType = Step["type"];
@@ -7,15 +7,7 @@ type StepType = Step["type"];
 const props = defineProps<{ modelValue: StepType }>();
 const emit = defineEmits<{ "update:modelValue": [StepType] }>();
 
-const open = ref(false);
-const trigger = ref<HTMLButtonElement | null>(null);
-const panel = ref<HTMLDivElement | null>(null);
-const pos = reactive<{ top: string; bottom: string; left: string; width: string }>({
-  top: "0px",
-  bottom: "",
-  left: "0px",
-  width: "124px",
-});
+const { open, trigger, panel, pos, toggle, close } = useDropdown();
 
 const options: { type: StepType; label: string }[] = [
   { type: "wait", label: "等待" },
@@ -27,71 +19,16 @@ const options: { type: StepType; label: string }[] = [
   { type: "pasteText", label: "输入文本(粘贴)" },
   { type: "runCommand", label: "运行命令" },
   { type: "click", label: "点击坐标" },
+  { type: "if", label: "条件判断" },
   { type: "rollbackClipboard", label: "剪切板回滚" },
 ];
 
 const current = () => options.find((o) => o.type === props.modelValue);
 
-async function toggle() {
-  open.value = !open.value;
-  if (open.value) {
-    await nextTick();
-    updatePosition();
-  }
-}
-
-function updatePosition() {
-  if (!trigger.value) return;
-  const r = trigger.value.getBoundingClientRect();
-  const gap = 8;
-  const panelH = panel.value?.offsetHeight ?? 0;
-  const spaceBelow = window.innerHeight - r.bottom - gap;
-  pos.left = `${r.left}px`;
-  pos.width = `${r.width}px`;
-  if (spaceBelow < panelH && r.top > spaceBelow) {
-    pos.top = "";
-    pos.bottom = `${window.innerHeight - r.top + gap}px`;
-  } else {
-    pos.bottom = "";
-    pos.top = `${r.bottom + gap}px`;
-  }
-}
-
 function pick(t: StepType) {
   emit("update:modelValue", t);
-  open.value = false;
+  close();
 }
-
-function onDocClick(e: MouseEvent) {
-  if (trigger.value && !trigger.value.contains(e.target as Node)) open.value = false;
-}
-
-function onScroll(e: Event) {
-  if (!open.value || !trigger.value) return;
-  const t = e.target as Node;
-  if (
-    t === document ||
-    (t.nodeType === 1 && (t as HTMLElement).contains(trigger.value))
-  ) {
-    open.value = false;
-  }
-}
-
-function onKeydown(e: KeyboardEvent) {
-  if (e.key === "Escape") open.value = false;
-}
-
-onMounted(() => {
-  document.addEventListener("click", onDocClick);
-  window.addEventListener("scroll", onScroll, true);
-  window.addEventListener("keydown", onKeydown);
-});
-
-onUnmounted(() => {
-  document.removeEventListener("click", onDocClick);
-  window.removeEventListener("scroll", onScroll, true);
-  window.removeEventListener("keydown", onKeydown);
-});
 </script>
 
 <template>
@@ -295,6 +232,10 @@ onUnmounted(() => {
 
 .t-click {
   background: #60a5fa;
+}
+
+.t-if {
+  background: #c084fc;
 }
 
 .t-rollbackClipboard {

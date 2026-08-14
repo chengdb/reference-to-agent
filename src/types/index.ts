@@ -8,6 +8,37 @@ export interface AxisPos {
   unit: Unit;
 }
 
+/** 比较操作符。 */
+export type CompareOp =
+  | "eq"
+  | "ne"
+  | "gt"
+  | "ge"
+  | "lt"
+  | "le"
+  | "startsWith"
+  | "endsWith"
+  | "contains"
+  | "matches";
+
+/** 单个条件分支（if / else-if）：value op expected 时执行 then。 */
+export interface CompareBranch {
+  op: CompareOp;
+  value: string;
+  expected: string;
+  then: Step[];
+}
+
+/** if 分叉步骤：value op expected ? then : (elseIf... | else)。 */
+export interface IfBranch {
+  op: CompareOp;
+  value: string;
+  expected: string;
+  then: Step[];
+  elseIf: CompareBranch[];
+  else: Step[];
+}
+
 export type Step =
   | { type: "wait"; ms: number }
   | { type: "hotkey"; keys: string }
@@ -18,6 +49,7 @@ export type Step =
   | { type: "pasteText"; text: string }
   | { type: "runCommand"; cmd: string; args: string[] }
   | { type: "click"; title: string; x: AxisPos; y: AxisPos }
+  | { type: "if"; op: CompareOp; value: string; expected: string; then: Step[]; elseIf: CompareBranch[]; else: Step[] }
   | { type: "rollbackClipboard" };
 
 export interface Recipe {

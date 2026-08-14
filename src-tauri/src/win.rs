@@ -79,9 +79,10 @@ pub fn find_window_by_title(title: &str) -> Option<isize> {
         if is_tool_window(h) {
             continue;
         }
-        let mut buf = [0u16; 512];
-        let len = unsafe { GetWindowTextW(h as HWND, buf.as_mut_ptr(), buf.len() as i32) };
-        let t = String::from_utf16_lossy(&buf[..len.max(0) as usize]);
+        let t = match window_title(h) {
+            Some(t) => t,
+            None => continue,
+        };
         let tl = t.to_lowercase();
         if !tl.contains(&needle) {
             continue;
@@ -97,6 +98,27 @@ pub fn find_window_by_title(title: &str) -> Option<isize> {
     pick_front_window(&exact)
         .or_else(|| pick_front_window(&prefix))
         .or_else(|| pick_front_window(&contains))
+}
+
+/// 读取窗口标题（GetWindowTextW 的 UTF-16 解码）。访问某些进程的窗口可能失败，返回 None。
+pub fn window_title(hwnd: isize) -> Option<String> {
+    unsafe {
+        let len = GetWindowTextLengthW(hwnd as HWND);
+        if len <= 0 {
+            return None;
+        }
+        let mut buf = vec![0u16; len as usize + 1];
+        let read = GetWindowTextW(hwnd as HWND, buf.as_mut_ptr(), buf.len() as i32);
+        if read <= 0 {
+            return None;
+        }
+        let title = String::from_utf16_lossy(&buf[..read as usize]);
+        if title.is_empty() {
+            None
+        } else {
+            Some(title)
+        }
+    }
 }
 
 /// 返回窗口所属进程 PID。
@@ -865,35 +887,43 @@ fn launch_store_app(alias: &str) -> Result<(), String> {
 }
 
 /// 聚焦已打开的窗口（优先按进程 exe 匹配，其次按标题；不启动新进程）。
+/// 成功时返回聚焦窗口的真实标题（供调用方存入变量），读取标题失败则返回 None。
 /// 商店应用无真实 exe，按标题匹配即可。
-pub fn focus_app(title: &str, exe: Option<&str>) -> Result<(), String> {
+pub fn focus_app(title: &str, exe: Option<&str>) -> Result<Option<String>, String> {
     if let Some(exe) = exe {
         if !exe.trim().is_empty() && !is_store_alias(exe) {
             if let Some(hwnd) = find_window_by_exe(exe) {
-                return set_foreground(hwnd);
+                set_foreground(hwnd)?;
+                return Ok(window_title(hwnd));
             }
         }
     }
     match find_window_by_title(title) {
-        Some(hwnd) => set_foreground(hwnd),
+        Some(hwnd) => {
+            set_foreground(hwnd)?;
+            Ok(window_title(hwnd))
+        }
         None => Err(format!("未找到“{title}”对应的已打开窗口")),
     }
 }
 
 /// 激活目标应用：优先按进程 exe 匹配已开窗口，其次按标题；都没有则尝试启动并等待。
+/// 成功时返回聚焦窗口的真实标题（供调用方存入变量），读取标题失败则返回 None。
 /// 商店应用按标题匹配窗口，未启动时用 ShellExecuteW 按 AUMID 拉起。
-pub fn activate_app(title: &str, exe: Option<&str>) -> Result<(), String> {
+pub fn activate_app(title: &str, exe: Option<&str>) -> Result<Option<String>, String> {
     let store = exe.map(is_store_alias).unwrap_or(false);
     if let Some(exe) = exe {
         if !exe.trim().is_empty() && !is_store_alias(exe) {
             if let Some(hwnd) = find_window_by_exe(exe) {
-                return set_foreground(hwnd);
+                set_foreground(hwnd)?;
+                return Ok(window_title(hwnd));
             }
         }
     }
     if !title.trim().is_empty() {
         if let Some(hwnd) = find_window_by_title(title) {
-            return set_foreground(hwnd);
+            set_foreground(hwnd)?;
+            return Ok(window_title(hwnd));
         }
     }
     if let Some(exe) = exe {
@@ -922,7 +952,7 @@ pub fn activate_app(title: &str, exe: Option<&str>) -> Result<(), String> {
             if let Some(h) = hwnd {
                 started = Some(h);
                 if set_foreground(h).is_ok() {
-                    return Ok(());
+                    return Ok(window_title(h));
                 }
             }
         }

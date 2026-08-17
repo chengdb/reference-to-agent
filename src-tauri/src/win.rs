@@ -22,6 +22,9 @@ use windows_sys::Win32::UI::WindowsAndMessaging::{
     IsWindowVisible, SetCursorPos, SetForegroundWindow, ShowWindow, GWL_EXSTYLE, SW_RESTORE,
     SW_SHOW, SW_SHOWNORMAL, WS_EX_TOOLWINDOW,
 };
+use windows_sys::Win32::Storage::FileSystem::{
+    GetFileVersionInfoSizeW, GetFileVersionInfoW, VerQueryValueW,
+};
 
 use enigo::{Direction, Enigo, Key, Keyboard, Settings};
 
@@ -353,6 +356,78 @@ fn parse_lnk(path: &str) -> Option<String> {
     }
 }
 
+/// 读取 exe 版本资源里的本地化显示名（FileDescription），
+/// 例如 mstsc 的“远程桌面连接”。读取失败或没有有效字符串时返回 None，
+/// 调用方回退到快捷方式文件名。
+fn exe_display_name(exe: &str) -> Option<String> {
+    unsafe {
+        let wpath: Vec<u16> = exe.encode_utf16().chain(std::iter::once(0)).collect();
+        let mut handle = 0u32;
+        let size = GetFileVersionInfoSizeW(wpath.as_ptr(), &mut handle);
+        if size == 0 {
+            return None;
+        }
+        let mut buf = vec![0u8; size as usize];
+        if GetFileVersionInfoW(wpath.as_ptr(), handle, size, buf.as_mut_ptr() as *mut c_void) == 0 {
+            return None;
+        }
+        let data = buf.as_ptr() as *const c_void;
+
+        // 翻译表：每项一个 DWORD（低 16 位语言、高 16 位代码页）。
+        let trans_key: Vec<u16> = "\\VarFileInfo\\Translation"
+            .encode_utf16()
+            .chain(std::iter::once(0))
+            .collect();
+        let mut trans: *mut c_void = null_mut();
+        let mut trans_len: u32 = 0;
+        if VerQueryValueW(data, trans_key.as_ptr(), &mut trans, &mut trans_len) == 0
+            || trans.is_null()
+            || trans_len < 4
+        {
+            return None;
+        }
+        let pairs = std::slice::from_raw_parts(trans as *const u16, trans_len as usize / 2);
+        for chunk in pairs.chunks_exact(2) {
+            let (lang, cp) = (chunk[0], chunk[1]);
+            let key = format!("\\StringFileInfo\\{lang:04X}{cp:04X}\\FileDescription");
+            let wkey: Vec<u16> = key.encode_utf16().chain(std::iter::once(0)).collect();
+            let mut val: *mut c_void = null_mut();
+            let mut val_len: u32 = 0;
+            if VerQueryValueW(data, wkey.as_ptr(), &mut val, &mut val_len) == 0
+                || val.is_null()
+                || val_len < 2
+            {
+                continue;
+            }
+            // 长度（字节）含结尾空字符。
+            let chars = val_len as usize / 2 - 1;
+            let s = String::from_utf16_lossy(std::slice::from_raw_parts(val as *const u16, chars));
+            let trimmed = s.trim().to_string();
+            if !trimmed.is_empty() {
+                return Some(trimmed);
+            }
+        }
+        None
+    }
+}
+
+/// 快捷方式显示名：优先用 exe 版本资源的本地化显示名（FileDescription），
+/// 只有在该名字缺失、或与快捷方式文件名 / exe 文件名重复（退化）时才回退到快捷方式文件名。
+fn pick_display_name(stem: &str, exe: &str) -> String {
+    let exe_stem = std::path::Path::new(exe)
+        .file_stem()
+        .map(|s| s.to_string_lossy().to_string())
+        .unwrap_or_default();
+    match exe_display_name(exe) {
+        Some(n)
+            if !n.eq_ignore_ascii_case(stem) && !n.eq_ignore_ascii_case(&exe_stem) =>
+        {
+            n
+        }
+        _ => stem.to_string(),
+    }
+}
+
 fn collect_lnks(dir: &str, apps: &mut Vec<(String, String)>, seen: &mut HashSet<String>) {
     let entries = match std::fs::read_dir(dir) {
         Ok(e) => e,
@@ -367,11 +442,11 @@ fn collect_lnks(dir: &str, apps: &mut Vec<(String, String)>, seen: &mut HashSet<
         if path.extension().map(|e| e.to_string_lossy().to_lowercase()) != Some("lnk".into()) {
             continue;
         }
-        let name = path
+        let stem = path
             .file_stem()
             .map(|s| s.to_string_lossy().to_string())
             .unwrap_or_default();
-        if name.is_empty() {
+        if stem.is_empty() {
             continue;
         }
         if let Some(exe) = parse_lnk(&path.to_string_lossy()) {
@@ -379,7 +454,7 @@ fn collect_lnks(dir: &str, apps: &mut Vec<(String, String)>, seen: &mut HashSet<
                 continue;
             }
             if seen.insert(exe.to_lowercase()) {
-                apps.push((name, exe));
+                apps.push((pick_display_name(&stem, &exe), exe));
             }
         }
     }

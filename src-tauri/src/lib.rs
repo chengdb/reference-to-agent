@@ -572,6 +572,11 @@ fn ask_confirm(
     };
     crate::debug_log!("ask_confirm: got response {choice:?}");
 
+    // 用户按过 Enter/Shift+Enter。Enter 不是修饰键，不会污染后续注入；
+    // 只有 Shift+Enter 残留的 Shift 才需要等其松开，避免 Alt+L 复制被当成 Alt+Shift+L 而失败。
+    // 普通 Enter 瞬间返回（零延迟），Shift+Enter 也只需很短的松开等待，不会造成明显卡顿。
+    win::wait_for_shift_released();
+
     // 窗口本身已在按键回调里隐藏，这里兜底隐藏。
     let _ = confirm_win.hide();
     *app.state::<AppState>().pending_confirm.lock().unwrap() = None;

@@ -973,6 +973,33 @@ pub fn type_text(text: &str) -> Result<(), String> {
     enigo.text(text).map_err(|e| e.to_string())
 }
 
+/// 若残留按下过 Shift（按下 Shift+Enter 确认全部时），等它松开后再放行下一步，避免
+/// 残留修饰键污染下一步注入（Alt+L 复制会被当成 Alt+Shift+L、导致复制失败，表现为
+/// “回滚剪切板先于粘贴、粘贴到的是旧剪贴板”）。
+///
+/// 只等真正会污染组合键的 Shift：
+/// - 普通 Enter 确认时此刻 Shift 未按下，立即返回（零延迟）；
+/// - Shift+Enter 确认全部时此刻 Shift 仍按下，等待其松开（正常 ~几十到一两百毫秒），
+///   并带上限（最多约 400ms）保险，避免长时间阻塞造成可按觉的延迟。
+/// 不等待 Enter 本身——Enter 不是修饰键，残留它不会把 Alt+L/Shift+Insert 错拼成别的键。
+pub fn wait_for_shift_released() {
+    // SAFETY: GetAsyncKeyState 是纯查询函数，无未定义行为要求。
+    let shift_down = unsafe { GetAsyncKeyState(VK_SHIFT as i32) as i32 & 0x8000 != 0 };
+    if !shift_down {
+        return;
+    }
+    crate::debug_log!("wait_for_shift_released: waiting for Shift up");
+    for _ in 0..8 {
+        thread::sleep(Duration::from_millis(50));
+        // SAFETY: 同上。
+        if unsafe { GetAsyncKeyState(VK_SHIFT as i32) as i32 & 0x8000 == 0 } {
+            crate::debug_log!("wait_for_shift_released: released");
+            return;
+        }
+    }
+    crate::debug_log!("wait_for_shift_released: gave up on timeout");
+}
+
 /// 启动外部程序（不等待）。
 pub fn launch_app(exe: &str) -> Result<(), String> {
     std::process::Command::new(exe)

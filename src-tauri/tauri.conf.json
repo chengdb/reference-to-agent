@@ -30,6 +30,45 @@
         "resizable": false,
         "visible": false,
         "shadow": false
+      },
+      {
+        "label": "list",
+        "title": "Recipe List",
+        "width": 400,
+        "height": 560,
+        "decorations": false,
+        "transparent": true,
+        "alwaysOnTop": true,
+        "skipTaskbar": true,
+        "resizable": false,
+        "visible": false,
+        "shadow": false
+      },
+      {
+        "label": "confirm",
+        "title": "Confirm Step",
+        "width": 500,
+        "height": 240,
+        "decorations": false,
+        "transparent": true,
+        "alwaysOnTop": true,
+        "skipTaskbar": true,
+        "resizable": false,
+        "visible": false,
+        "shadow": false
+      },
+      {
+        "label": "toast",
+        "title": "Warning",
+        "width": 560,
+        "height": 76,
+        "decorations": false,
+        "transparent": true,
+        "alwaysOnTop": true,
+        "skipTaskbar": true,
+        "resizable": false,
+        "visible": false,
+        "shadow": false
       }
     ],
     "security": {

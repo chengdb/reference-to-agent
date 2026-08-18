@@ -1,6 +1,7 @@
 import { computed, effectScope, reactive, ref, watch } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import { buildMenuItems, normalizeSlots, type MenuItem } from "../utils/menu";
+import { invokeWithRetry } from "../utils/invokeRetry";
 import type {
   AppEntry,
   AxisPos,
@@ -26,6 +27,8 @@ export interface EditableCompareBranch {
 /** 编辑用步骤结构（宽松字段，保存时按 type 归一化）。 */
 export interface EditableStep {
   type: StepType;
+  /** 执行前人工确认（需配方启用「人工确认」）。 */
+  confirm?: boolean;
   ms?: number;
   keys?: string;
   title?: string;
@@ -51,6 +54,8 @@ export interface EditableStep {
 
 export interface EditableRecipe {
   name: string;
+  /** 配方级人工确认开关：启用后，勾选了 confirm 的步骤执行前会询问。 */
+  confirm?: boolean;
   steps: EditableStep[];
 }
 
@@ -96,6 +101,7 @@ const FONT_SIZES = [10, 11, 12, 13, 14, 15, 16, 18, 20];
 
 const DEFAULT_CONFIG: Config = {
   globalHotkey: "Ctrl+Alt+R",
+  listHotkey: "Ctrl+Alt+L",
   menu: DEFAULT_MENU,
   recipes: [
     {
@@ -127,8 +133,14 @@ const DEFAULT_CONFIG: Config = {
   ],
 };
 
-const cfg = reactive<{ globalHotkey: string; recipes: EditableRecipe[]; menu: MenuConfig }>({
+const cfg = reactive<{
+  globalHotkey: string;
+  listHotkey: string;
+  recipes: EditableRecipe[];
+  menu: MenuConfig;
+}>({
   globalHotkey: "",
+  listHotkey: "",
   recipes: [],
   menu: { ...DEFAULT_MENU, slots: DEFAULT_MENU.slots.map((s) => ({ ...s })) },
 });
@@ -139,8 +151,10 @@ const selectedSlot = ref<number | null>(null);
 const selectedStep = ref<EditableStep | null>(null);
 const toast = ref<{ type: "success" | "error"; msg: string } | null>(null);
 let toastTimer: number | undefined;
-/** 热键录制目标：'global' 或 'step'（配合 recordingStep）。 */
-const recording = ref<"global" | "step" | null>(null);
+/** 最近的加载失败信息（非空时在配置页顶部以红色条显示，便于定位“配置空/全空”问题）。 */
+const loadError = ref<string | null>(null);
+/** 热键录制目标：'global'（圆盘）、'list'（完整配方列表）或 'step'（配合 recordingStep）。 */
+const recording = ref<"global" | "list" | "step" | null>(null);
 /** 正在录制热键的步骤（recording === 'step' 时有效）。 */
 const recordingStep = ref<EditableStep | null>(null);
 const picker = ref<{ step: EditableStep | null; list: AppEntry[] } | null>(null);
@@ -295,7 +309,10 @@ function stepsShape(steps: EditableStep[]): unknown {
 /** 递归补齐 click / if 步骤的默认字段。 */
 function normalizeStepFields(steps: EditableStep[]) {
   for (const s of steps) {
-    if (s.type === "click") {
+    // 等待步骤不注入任何操作，无需人工确认：切换到 wait 时自动清掉该标记。
+    if (s.type === "wait") {
+      s.confirm = false;
+    } else if (s.type === "click") {
       if (s.xBase == null) s.xBase = "left";
       if (s.xValue == null) s.xValue = 0.5;
       if (s.xUnit == null) s.xUnit = "percent";
@@ -347,33 +364,34 @@ function toEditable(s: Step): EditableStep {
       break;
     case "runCommand":
       e.cmd = s.cmd;
-      e.argsText = s.args.join(", ");
+      e.argsText = (s.args ?? []).join(", ");
       break;
     case "click":
       e.title = s.title;
-      e.xBase = s.x.base === "right" ? "right" : "left";
-      e.xValue = s.x.value;
-      e.xUnit = s.x.unit;
-      e.yBase = s.y.base === "bottom" ? "bottom" : "top";
-      e.yValue = s.y.value;
-      e.yUnit = s.y.unit;
+      e.xBase = s.x?.base === "right" ? "right" : "left";
+      e.xValue = s.x?.value;
+      e.xUnit = s.x?.unit;
+      e.yBase = s.y?.base === "bottom" ? "bottom" : "top";
+      e.yValue = s.y?.value;
+      e.yUnit = s.y?.unit;
       break;
     case "if":
       e.op = s.op;
       e.value = s.value;
       e.expected = s.expected;
-      e.then = s.then.map(toEditable);
-      e.elseIf = s.elseIf.map((b) => ({
+      e.then = (s.then ?? []).map(toEditable);
+      e.elseIf = (s.elseIf ?? []).map((b) => ({
         op: b.op,
         value: b.value,
         expected: b.expected,
-        then: b.then.map(toEditable),
+        then: (b.then ?? []).map(toEditable),
       }));
-      e.else = s.else.map(toEditable);
+      e.else = (s.else ?? []).map(toEditable);
       break;
     case "rollbackClipboard":
       break;
   }
+  e.confirm = s.confirm ?? undefined;
   return e;
 }
 
@@ -396,27 +414,29 @@ function clickAxisPos(e: EditableStep): { x: AxisPos; y: AxisPos } {
 function toStep(e: EditableStep): Step {
   switch (e.type) {
     case "wait":
-      return { type: "wait", ms: Math.max(0, Math.round(Number(e.ms) || 0)) };
+      return { type: "wait", ms: Math.max(0, Math.round(Number(e.ms) || 0)), confirm: false };
     case "hotkey":
-      return { type: "hotkey", keys: (e.keys ?? "").trim() };
+      return { type: "hotkey", keys: (e.keys ?? "").trim(), confirm: e.confirm === true };
     case "activateApp":
       return {
         type: "activateApp",
         title: (e.title ?? "").trim(),
         exe: e.exe?.trim() || null,
+        confirm: e.confirm === true,
       };
     case "focusApp":
       return {
         type: "focusApp",
         title: (e.title ?? "").trim(),
         exe: e.exe?.trim() || null,
+        confirm: e.confirm === true,
       };
     case "setClipboard":
-      return { type: "setClipboard", text: e.text ?? "" };
+      return { type: "setClipboard", text: e.text ?? "", confirm: e.confirm === true };
     case "typeText":
-      return { type: "typeText", text: e.text ?? "" };
+      return { type: "typeText", text: e.text ?? "", confirm: e.confirm === true };
     case "pasteText":
-      return { type: "pasteText", text: e.text ?? "" };
+      return { type: "pasteText", text: e.text ?? "", confirm: e.confirm === true };
     case "runCommand":
       return {
         type: "runCommand",
@@ -425,9 +445,15 @@ function toStep(e: EditableStep): Step {
           .split(",")
           .map((s) => s.trim())
           .filter(Boolean),
+        confirm: e.confirm === true,
       };
     case "click":
-      return { type: "click", title: (e.title ?? "").trim(), ...clickAxisPos(e) };
+      return {
+        type: "click",
+        title: (e.title ?? "").trim(),
+        ...clickAxisPos(e),
+        confirm: e.confirm === true,
+      };
     case "if":
       return {
         type: "if",
@@ -442,15 +468,17 @@ function toStep(e: EditableStep): Step {
           then: b.then.map(toStep),
         })),
         else: (e.else ?? []).map(toStep),
+        confirm: e.confirm === true,
       };
     case "rollbackClipboard":
-      return { type: "rollbackClipboard" };
+      return { type: "rollbackClipboard", confirm: e.confirm === true };
   }
 }
 
 function buildConfig(): Config {
   return {
     globalHotkey: cfg.globalHotkey.trim() || "Ctrl+Alt+R",
+    listHotkey: cfg.listHotkey.trim() || "Ctrl+Alt+L",
     menu: {
       size: Math.round(cfg.menu.size),
       sectors: cfg.menu.sectors,
@@ -472,23 +500,48 @@ function buildConfig(): Config {
     },
     recipes: cfg.recipes.map((r) => ({
       name: r.name.trim() || "未命名配方",
+      confirm: r.confirm === true,
       steps: r.steps.map(toStep),
     })),
   };
 }
 
 async function load() {
-  const c = await invoke<Config>("get_config");
-  const base = c ?? DEFAULT_CONFIG;
-  cfg.globalHotkey = base.globalHotkey;
-  cfg.menu = { ...DEFAULT_MENU, ...(base.menu ?? {}) };
-  cfg.menu.slots = normalizeSlots(cfg.menu.slots, cfg.menu.sectors);
-  cfg.recipes = base.recipes.map((r) => ({
-    name: r.name,
-    steps: r.steps.map(toEditable),
-  }));
-  if (cfg.recipes.length > 0) selectedIndex.value = 0;
-  selectedStep.value = null;
+  try {
+    // 见 invokeRetry.ts：启动时窗口 JS 可能早于后端 app.manage() 执行，首调 get_config
+    // 会报 "state not managed"。这里用带重试的调用等状态就绪；重试耗尽则向上抛，
+    // 由下方 catch 记录 loadError 并提示，避免静默变成空配置。
+    const c = await invokeWithRetry<Config>("get_config");
+    const base = c ?? DEFAULT_CONFIG;
+    cfg.globalHotkey = base.globalHotkey;
+    cfg.listHotkey = base.listHotkey ?? "Ctrl+Alt+L";
+    cfg.menu = { ...DEFAULT_MENU, ...(base.menu ?? {}) };
+    cfg.menu.slots = normalizeSlots(cfg.menu.slots, cfg.menu.sectors);
+    // 逐个配方映射：单个配方/步骤格式异常时只跳过该配方并记录错误，
+    // 不能因为一个坏项就让整个配置加载失败、界面变成空列表“像新软件”。
+    const mapped: EditableRecipe[] = [];
+    for (const r of base.recipes ?? []) {
+      try {
+        mapped.push({
+          name: r.name,
+          confirm: r.confirm === true,
+          steps: (r.steps ?? []).map(toEditable),
+        });
+      } catch (e) {
+        console.error("[load] skip malformed recipe:", r?.name, e);
+      }
+    }
+    cfg.recipes = mapped;
+    if (cfg.recipes.length > 0) selectedIndex.value = 0;
+    selectedStep.value = null;
+    loadError.value = null;
+  } catch (e) {
+    console.error("[load] FAILED:", e);
+    loadError.value = String(e);
+    // 加载失败时保留内存中的现有数据，不清空，并给出可见错误提示，
+    // 避免出现“配置看起来全丢了/空列表”又默默写回覆盖磁盘配置。
+    showToast("读取配置失败：" + String(e), "error");
+  }
 }
 
 async function save() {
@@ -726,11 +779,11 @@ function comboFromEvent(e: KeyboardEvent): string | null {
   return null;
 }
 
-/** 开启热键录制：target 传 'global' 录制全局热键，传步骤对象录制该步骤的 keys。 */
-function startRecording(target: "global" | EditableStep) {
+/** 开启热键录制：target 传 'global'/'list' 录制对应全局快捷键，传步骤对象录制该步骤的 keys。 */
+function startRecording(target: "global" | "list" | EditableStep) {
   const currently = recording.value;
-  if (target === "global") {
-    recording.value = currently === "global" ? null : "global";
+  if (target === "global" || target === "list") {
+    recording.value = currently === target ? null : target;
     recordingStep.value = null;
   } else {
     const isSame = recording.value === "step" && recordingStep.value === target;
@@ -754,6 +807,8 @@ function onKeydown(e: KeyboardEvent) {
   if (!combo) return;
   if (recording.value === "global") {
     cfg.globalHotkey = combo;
+  } else if (recording.value === "list") {
+    cfg.listHotkey = combo;
   } else if (recording.value === "step") {
     const step = recordingStep.value;
     if (step && step.type === "hotkey") step.keys = combo;
@@ -817,5 +872,6 @@ export function useConfigStore() {
     clearSlotColor,
     setSlotShowIcon,
     setSlotShowLabel,
+    loadError,
   };
 }

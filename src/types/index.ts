@@ -39,21 +39,26 @@ export interface IfBranch {
   else: Step[];
 }
 
+/** 步骤公共可选字段：执行前人工确认（需配方启用「人工确认」，Enter 确认 / Esc 取消）。 */
+type StepFlags = { confirm?: boolean };
+
 export type Step =
-  | { type: "wait"; ms: number }
-  | { type: "hotkey"; keys: string }
-  | { type: "activateApp"; title: string; exe?: string | null }
-  | { type: "focusApp"; title: string; exe?: string | null }
-  | { type: "setClipboard"; text: string }
-  | { type: "typeText"; text: string }
-  | { type: "pasteText"; text: string }
-  | { type: "runCommand"; cmd: string; args: string[] }
-  | { type: "click"; title: string; x: AxisPos; y: AxisPos }
-  | { type: "if"; op: CompareOp; value: string; expected: string; then: Step[]; elseIf: CompareBranch[]; else: Step[] }
-  | { type: "rollbackClipboard" };
+  | (StepFlags & { type: "wait"; ms: number })
+  | (StepFlags & { type: "hotkey"; keys: string })
+  | (StepFlags & { type: "activateApp"; title: string; exe?: string | null })
+  | (StepFlags & { type: "focusApp"; title: string; exe?: string | null })
+  | (StepFlags & { type: "setClipboard"; text: string })
+  | (StepFlags & { type: "typeText"; text: string })
+  | (StepFlags & { type: "pasteText"; text: string })
+  | (StepFlags & { type: "runCommand"; cmd: string; args: string[] })
+  | (StepFlags & { type: "click"; title: string; x: AxisPos; y: AxisPos })
+  | (StepFlags & { type: "if"; op: CompareOp; value: string; expected: string; then: Step[]; elseIf: CompareBranch[]; else: Step[] })
+  | (StepFlags & { type: "rollbackClipboard" });
 
 export interface Recipe {
   name: string;
+  /** 是否启用人工确认：启用后，勾选了 confirm 的步骤执行前会询问（Enter 确认 / Esc 取消）。 */
+  confirm?: boolean;
   steps: Step[];
 }
 
@@ -90,6 +95,7 @@ export interface MenuConfig {
 
 export interface Config {
   globalHotkey: string;
+  listHotkey: string;
   recipes: Recipe[];
   menu: MenuConfig;
 }

@@ -6,7 +6,7 @@ const { cfg, activeSection, recording, startRecording } = useConfigStore();
 
 <template>
   <section v-show="activeSection === 'basic'" class="card config-section basic-panel">
-    <div class="config-label">全局快捷键 · 弹出菜单</div>
+    <div class="config-label">全局快捷键 · 弹出圆盘菜单</div>
     <div class="hotkey-row">
       <input
         class="config-input hotkey-input"
@@ -20,6 +20,23 @@ const { cfg, activeSection, recording, startRecording } = useConfigStore();
         @click="startRecording('global')"
       >
         {{ recording === "global" ? "录制中 · Esc 取消" : "录制" }}
+      </button>
+    </div>
+
+    <div class="config-label">全局快捷键 · 弹出完整配方列表</div>
+    <div class="hotkey-row">
+      <input
+        class="config-input hotkey-input"
+        :value="cfg.listHotkey"
+        readonly
+        :placeholder="recording === 'list' ? '请按下组合键…' : '点击右侧「录制」设置'"
+      />
+      <button
+        class="rec-btn"
+        :class="{ recording: recording === 'list' }"
+        @click="startRecording('list')"
+      >
+        {{ recording === "list" ? "录制中 · Esc 取消" : "录制" }}
       </button>
     </div>
   </section>

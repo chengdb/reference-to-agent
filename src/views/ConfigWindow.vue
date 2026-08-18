@@ -8,7 +8,7 @@ import AppPickerDialog from "../components/config/AppPickerDialog.vue";
 import ToastMessage from "../components/config/ToastMessage.vue";
 import { useConfigStore } from "../composables/useConfigStore";
 
-const { load, save, onKeydown, onCoordPickKeydown } = useConfigStore();
+const { load, save, onKeydown, onCoordPickKeydown, loadError } = useConfigStore();
 
 onMounted(() => {
   load();
@@ -23,6 +23,10 @@ onUnmounted(() => {
 
 <template>
   <div class="config">
+    <div v-if="loadError" class="config-load-error">
+      <span class="config-load-error-title">配置加载失败</span>
+      <span class="config-load-error-msg">{{ loadError }}</span>
+    </div>
     <div class="config-head">
       <div class="config-brand">
         <div class="config-logo"></div>
@@ -66,6 +70,27 @@ onUnmounted(() => {
     radial-gradient(1100px 480px at 15% -10%, rgba(109, 124, 255, 0.12), transparent 60%),
     radial-gradient(900px 420px at 100% -5%, rgba(168, 85, 247, 0.08), transparent 55%),
     var(--bg);
+}
+
+.config-load-error {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 8px 12px;
+  border: 1px solid rgba(248, 113, 113, 0.5);
+  border-radius: 10px;
+  background: rgba(248, 113, 113, 0.12);
+  color: var(--red, #f87171);
+  font-size: 12px;
+}
+.config-load-error-title {
+  font-weight: 700;
+}
+.config-load-error-msg {
+  font-family: ui-monospace, monospace;
+  word-break: break-all;
+  white-space: pre-wrap;
+  opacity: 0.9;
 }
 
 .config-head {

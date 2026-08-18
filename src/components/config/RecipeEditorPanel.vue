@@ -18,7 +18,12 @@ const {
 <template>
   <section v-show="activeSection === 'recipes'" class="card config-section recipe-editor">
     <div class="recipe-list">
-      <div class="recipe-list-title">配方</div>
+      <div class="recipe-list-title">
+        配方
+        <span class="recipe-count" :class="{ zero: cfg.recipes.length === 0 }">
+          {{ cfg.recipes.length }} 个
+        </span>
+      </div>
       <div
         v-for="(r, i) in cfg.recipes"
         :key="i"
@@ -40,8 +45,18 @@ const {
     <div v-if="current" class="recipe-edit">
       <div class="recipe-name-row">
         <input v-model="current.name" class="config-input recipe-name" placeholder="配方名称" />
+        <label
+          class="recipe-confirm-toggle"
+          title="启用后，步骤中勾选了「确认」的步骤会在执行前弹出确认（Enter 执行 / Esc 取消）"
+        >
+          <input type="checkbox" v-model="current.confirm" />
+          <span>人工确认</span>
+        </label>
         <button class="btn btn-primary recipe-save" @click="save">保存配方</button>
       </div>
+      <p v-if="current.confirm" class="recipe-confirm-hint">
+        已启用人工确认：步骤勾选「确认」后，执行到该步骤前会询问，按 Enter 执行、Esc 取消。
+      </p>
       <StepList :steps="current.steps" />
     </div>
     <div v-else class="recipe-edit empty">选择一个配方进行编辑，或点击「+ 添加配方」</div>
@@ -78,6 +93,24 @@ const {
   color: var(--text-3);
   padding: 2px 6px 6px;
   letter-spacing: 0.4px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.recipe-count {
+  margin-left: auto;
+  padding: 1px 9px;
+  border-radius: var(--radius-pill);
+  background: rgba(109, 124, 255, 0.18);
+  color: var(--accent);
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.recipe-count.zero {
+  background: rgba(245, 158, 11, 0.16);
+  color: var(--yellow);
 }
 
 .recipe-item {
@@ -224,5 +257,39 @@ const {
 
 .recipe-save {
   flex-shrink: 0;
+}
+
+.recipe-confirm-toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 38px;
+  padding: 0 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: rgba(255, 255, 255, 0.03);
+  color: var(--text-2);
+  font-size: 12.5px;
+  font-weight: 600;
+  cursor: pointer;
+  user-select: none;
+  flex-shrink: 0;
+  transition: border-color 0.15s, background 0.15s;
+}
+
+.recipe-confirm-toggle:hover {
+  border-color: rgba(124, 108, 255, 0.5);
+  background: rgba(109, 124, 255, 0.08);
+}
+
+.recipe-confirm-toggle input {
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+
+.recipe-confirm-hint {
+  margin: -6px 0 0;
+  font-size: 11.5px;
+  color: var(--yellow);
 }
 </style>

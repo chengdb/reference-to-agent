@@ -16,6 +16,11 @@ dist-ssr
 src-tauri/target
 src-tauri/gen/schemas
 
+# 配置备份（用户数据，不入库）
+config.backup.json
+config.json.corrupt-*
+config.json.backup
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json

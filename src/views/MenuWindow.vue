@@ -5,12 +5,12 @@ import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import Radial from "../components/ui/Radial.vue";
 import { buildMenuItems, type MenuItem } from "../utils/menu";
+import { invokeWithRetry } from "../utils/invokeRetry";
 import type { MenuConfig, Recipe } from "../types";
 
 const win = getCurrentWindow();
 const recipes = ref<Recipe[]>([]);
 const menu = ref<MenuConfig>({ size: 400, sectors: 8, showLabels: true, slots: [] });
-const status = ref("");
 
 const ordered = computed<(MenuItem | null)[]>(() =>
   buildMenuItems(recipes.value, menu.value.sectors, menu.value.slots)
@@ -21,17 +21,19 @@ const closeSize = computed(() => 2 * Math.max(36, menu.value.size * 0.145));
 const closeIcon = computed(() => Math.round(closeSize.value * 0.2));
 
 async function refresh() {
-  const data = await invoke<{ recipes: Recipe[]; menu: MenuConfig }>("get_menu");
+  // 启动竞态：见 invokeRetry.ts。onMounted 时后端 app.manage() 可能尚未执行，
+  // 首调 get_menu 会报 "state not managed"，这里带重试等状态就绪。
+  const data = await invokeWithRetry<{ recipes: Recipe[]; menu: MenuConfig }>("get_menu");
   recipes.value = data.recipes;
   menu.value = data.menu;
 }
 
 async function run(name: string) {
-  status.value = "";
   try {
     await invoke("run_recipe", { name });
   } catch (e) {
-    status.value = String(e);
+    // 失败原因改为顶部轻提示，不显示在圆盘窗口内。
+    invoke("show_warning", { message: String(e) });
   }
 }
 
@@ -99,8 +101,6 @@ onUnmounted(() => {
     <div v-if="extras > 0" class="radial-more">
       还有 {{ extras }} 个配方未绑定到菜单扇区
     </div>
-
-    <div v-if="status" class="radial-status">{{ status }}</div>
   </div>
 </template>
 
@@ -147,23 +147,6 @@ onUnmounted(() => {
   transform: translateX(-50%);
   color: var(--text-3);
   font-size: 11px;
-  white-space: nowrap;
-}
-
-.radial-status {
-  position: absolute;
-  bottom: 50px;
-  left: 50%;
-  transform: translateX(-50%);
-  max-width: 340px;
-  padding: 6px 14px;
-  border-radius: var(--radius-pill);
-  background: rgba(245, 158, 11, 0.14);
-  border: 1px solid rgba(245, 158, 11, 0.3);
-  color: var(--yellow);
-  font-size: 12px;
-  text-align: center;
-  word-break: break-all;
   white-space: nowrap;
 }
 </style>

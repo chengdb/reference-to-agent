@@ -1,100 +1,46 @@
 <script setup lang="ts">
-import { computed } from "vue";
+import type { Component } from "vue";
 import StepTypeSelect from "../ui/StepTypeSelect.vue";
-import ListSelect from "../ui/ListSelect.vue";
 import StepInfoPopover from "./StepInfoPopover.vue";
-import VarInsertSelect from "./VarInsertSelect.vue";
-import { useConfigStore, type EditableStep, type StepType } from "../../composables/useConfigStore";
-import type { CompareOp } from "../../types";
+import WaitEditor from "./steps/WaitEditor.vue";
+import HotkeyEditor from "./steps/HotkeyEditor.vue";
+import AppTargetEditor from "./steps/AppTargetEditor.vue";
+import TextEditor from "./steps/TextEditor.vue";
+import RunCommandEditor from "./steps/RunCommandEditor.vue";
+import ClickEditor from "./steps/ClickEditor.vue";
+import IfEditor from "./steps/IfEditor.vue";
+import RollbackEditor from "./steps/RollbackEditor.vue";
+import { useConfigState } from "../../composables/useConfigState";
+import { useRecipes } from "../../composables/useRecipes";
+import { normalizeStepFields } from "../../utils/steps";
+import type { StepType } from "../../types";
+import type { EditableStep } from "../../types/editable";
 
 defineProps<{ steps: EditableStep[] }>();
 
-const {
-  current,
-  selectedStep,
-  recording,
-  recordingStep,
-  coordPicking,
-  selectStep,
-  addStepAt,
-  removeStep,
-  moveStep,
-  openPicker,
-  getWindowInfo,
-  startRecording,
-  startCoordPicking,
-  testClick,
-} = useConfigStore();
-
-/** 哪些步骤类型会产出哪些变量名（供条件判断下拉选择）。 */
-const VAR_PRODUCERS: Partial<Record<StepType, string[]>> = {
-  focusApp: ["title"],
-  activateApp: ["title"],
+/** 步骤类型 → 参数编辑器组件。新增步骤类型时在 steps/ 下新建编辑器并登记到此表。 */
+const EDITORS: Record<StepType, Component> = {
+  wait: WaitEditor,
+  hotkey: HotkeyEditor,
+  activateApp: AppTargetEditor,
+  focusApp: AppTargetEditor,
+  setClipboard: TextEditor,
+  typeText: TextEditor,
+  pasteText: TextEditor,
+  runCommand: RunCommandEditor,
+  click: ClickEditor,
+  if: IfEditor,
+  rollbackClipboard: RollbackEditor,
 };
 
-/** 递归收集步骤树中会产出的变量名。 */
-function collectVarNames(steps: EditableStep[], out: Set<string>) {
-  for (const s of steps) {
-    const produced = VAR_PRODUCERS[s.type];
-    if (produced) for (const n of produced) out.add(n);
-    if (s.type === "if") {
-      collectVarNames(s.then ?? [], out);
-      for (const b of s.elseIf ?? []) collectVarNames(b.then ?? [], out);
-      collectVarNames(s.else ?? [], out);
-    }
-  }
-}
+const { selectedStep, selectStep } = useConfigState();
+const { addStepAt, removeStep, moveStep } = useRecipes();
 
-/** 当前配方整棵步骤树中可用的变量名（变量为配方级单值，故扫描全树）。 */
-const availableVars = computed(() => {
-  const out = new Set<string>();
-  collectVarNames(current.value?.steps ?? [], out);
-  return [...out];
-});
-
-/** 比较操作符选项。 */
-const OP_OPTIONS: { value: CompareOp; label: string }[] = [
-  { value: "eq", label: "等于 ==" },
-  { value: "ne", label: "不等于 !=" },
-  { value: "gt", label: "大于 >" },
-  { value: "ge", label: "大于等于 >=" },
-  { value: "lt", label: "小于 <" },
-  { value: "le", label: "小于等于 <=" },
-  { value: "startsWith", label: "前缀 startsWith" },
-  { value: "endsWith", label: "后缀 endsWith" },
-  { value: "contains", label: "包含 contains" },
-  { value: "matches", label: "正则匹配 matches" },
-];
-
-/** 点击坐标轴基准/单位选项。 */
-const BASE_X: { value: "left" | "right"; label: string }[] = [
-  { value: "left", label: "距左边" },
-  { value: "right", label: "距右边" },
-];
-const BASE_Y: { value: "top" | "bottom"; label: string }[] = [
-  { value: "top", label: "距上边" },
-  { value: "bottom", label: "距下边" },
-];
-const UNIT: { value: "percent" | "px"; label: string }[] = [
-  { value: "percent", label: "%" },
-  { value: "px", label: "px" },
-];
-
-/** 添加一个 else-if 分支。 */
-function addElseIf(step: EditableStep) {
-  const b = {
-    op: "eq" as CompareOp,
-    value: "${title}",
-    expected: "",
-    then: [] as EditableStep[],
-  };
-  step.elseIf = step.elseIf ?? [];
-  step.elseIf.push(b);
-}
-
-function removeElseIf(step: EditableStep, i: number) {
-  if (!step.elseIf) return;
-  step.elseIf.splice(i, 1);
+/** 切换步骤类型：保留可复用字段，并补齐新类型的默认字段。 */
+function onTypeChange(step: EditableStep, t: StepType) {
+  if (step.type === t) return;
+  (step as { type: StepType }).type = t;
+  normalizeStepFields([step]);
 }
 </script>
 
@@ -107,152 +53,12 @@ function removeElseIf(step: EditableStep, i: number) {
       <div class="step-row" :class="{ active: selectedStep === step }" @click="selectStep(step)">
         <span class="step-index">{{ si + 1 }}</span>
         <div class="step-body">
-          <StepTypeSelect v-model="step.type" class="step-type" />
-
-          <template v-if="step.type === 'wait'">
-            <input v-model.number="step.ms" type="number" min="0" class="config-input step-ms" placeholder="毫秒" />
-            <span class="step-unit">ms</span>
-          </template>
-
-          <template v-else-if="step.type === 'hotkey'">
-            <input
-              class="config-input step-keys"
-              :value="step.keys"
-              readonly
-              :placeholder="recording === 'step' && recordingStep === step ? '请按下组合键…' : '录制或手填'"
-            />
-            <button
-              class="rec-btn small"
-              :class="{ recording: recording === 'step' && recordingStep === step }"
-              @click="startRecording(step)"
-            >
-              {{ recording === "step" && recordingStep === step ? "…" : "录制" }}
-            </button>
-          </template>
-
-          <template v-else-if="step.type === 'activateApp'">
-            <input
-              v-model="step.title"
-              class="config-input step-title"
-              placeholder="窗口标题（模糊匹配）"
-            />
-            <button class="pick-btn" @click="openPicker(step)">选择应用…</button>
-            <button class="pick-btn small" @click="getWindowInfo(step)">查询标题</button>
-            <span v-if="step.exe" class="step-exe-display" :title="step.exe">{{ step.exe }}</span>
-          </template>
-
-          <template v-else-if="step.type === 'focusApp'">
-            <input
-              v-model="step.title"
-              class="config-input step-title"
-              placeholder="窗口标题（模糊匹配）"
-            />
-            <button class="pick-btn" @click="openPicker(step)">选择应用…</button>
-            <button class="pick-btn small" @click="getWindowInfo(step)">查询标题</button>
-            <span v-if="step.exe" class="step-exe-display" :title="step.exe">{{ step.exe }}</span>
-          </template>
-
-          <template v-else-if="step.type === 'setClipboard' || step.type === 'typeText' || step.type === 'pasteText'">
-            <input v-model="step.text" class="config-input step-text" placeholder="内容" />
-          </template>
-
-          <template v-else-if="step.type === 'runCommand'">
-            <input v-model="step.cmd" class="config-input step-cmd" placeholder="命令" />
-            <input v-model="step.argsText" class="config-input step-args" placeholder="参数，逗号分隔" />
-          </template>
-
-          <template v-else-if="step.type === 'click'">
-            <input
-              v-model="step.title"
-              class="config-input step-click-title"
-              placeholder="目标窗口标题（模糊匹配）"
-            />
-            <div class="step-axis">
-              <span class="step-axis-label">X</span>
-              <ListSelect v-model="step.xBase" :options="BASE_X" width="108px" />
-              <input
-                v-model.number="step.xValue"
-                type="number"
-                step="0.01"
-                min="0"
-                class="config-input step-axis-num"
-                placeholder="偏移"
-              />
-              <ListSelect v-model="step.xUnit" :options="UNIT" width="72px" />
-            </div>
-            <div class="step-axis">
-              <span class="step-axis-label">Y</span>
-              <ListSelect v-model="step.yBase" :options="BASE_Y" width="108px" />
-              <input
-                v-model.number="step.yValue"
-                type="number"
-                step="0.01"
-                min="0"
-                class="config-input step-axis-num"
-                placeholder="偏移"
-              />
-              <ListSelect v-model="step.yUnit" :options="UNIT" width="72px" />
-            </div>
-            <button
-              class="pick-btn small"
-              :class="{ recording: coordPicking === step }"
-              @click="startCoordPicking(step)"
-            >
-              {{ coordPicking === step ? "移到输入框后按 Enter…" : "拾取坐标" }}
-            </button>
-            <button class="pick-btn small" @click="testClick(step)">测试点击</button>
-          </template>
-
-          <template v-else-if="step.type === 'if'">
-            <div class="step-if">
-              <div class="step-if-head">
-                <span class="step-if-kw">if</span>
-                <ListSelect
-                  v-model="step.op"
-                  :options="OP_OPTIONS"
-                  width="150px"
-                />
-                <VarInsertSelect :available="availableVars" @select="step.value = $event" />
-                <input v-model="step.value" class="config-input step-if-value" placeholder="${title}" />
-                <VarInsertSelect :available="availableVars" @select="step.expected = $event" />
-                <input v-model="step.expected" class="config-input step-if-expected" placeholder="期望值" />
-                <button class="pick-btn small" @click="addElseIf(step)">+ else if</button>
-              </div>
-
-              <div class="step-branch">
-                <div class="step-branch-label">then</div>
-                <StepList :steps="step.then ?? []" />
-              </div>
-
-              <template v-for="(b, bi) in step.elseIf ?? []" :key="'ei' + bi">
-                <div class="step-branch">
-                  <div class="step-branch-label">
-                    else if
-                    <ListSelect
-                      v-model="b.op"
-                      :options="OP_OPTIONS"
-                      width="150px"
-                    />
-                    <VarInsertSelect :available="availableVars" @select="b.value = $event" />
-                    <input v-model="b.value" class="config-input step-if-value" placeholder="${title}" />
-                    <VarInsertSelect :available="availableVars" @select="b.expected = $event" />
-                    <input v-model="b.expected" class="config-input step-if-expected" placeholder="期望值" />
-                    <button class="step-branch-del" title="删除此分支" @click="removeElseIf(step, bi)">×</button>
-                  </div>
-                  <StepList :steps="b.then ?? []" />
-                </div>
-              </template>
-
-              <div class="step-branch">
-                <div class="step-branch-label">else</div>
-                <StepList :steps="step.else ?? []" />
-              </div>
-            </div>
-          </template>
-
-          <template v-else-if="step.type === 'rollbackClipboard'">
-            <span class="step-hint">恢复为配方执行前的剪贴板内容</span>
-          </template>
+          <StepTypeSelect
+            :model-value="step.type"
+            class="step-type"
+            @update:model-value="onTypeChange(step, $event)"
+          />
+          <component :is="EDITORS[step.type]" :step="step" />
         </div>
         <div class="step-controls">
           <label
@@ -460,167 +266,10 @@ function removeElseIf(step: EditableStep, i: number) {
   flex-shrink: 0;
 }
 
-.step-ms {
-  width: 92px;
-}
-
-.step-unit {
-  color: var(--text-3);
-  font-size: 12px;
-}
-
-.step-keys {
-  width: 220px;
-  flex-shrink: 0;
-  font-family: "Cascadia Code", Consolas, monospace;
-}
-
-.step-text {
-  width: 300px;
-  flex-shrink: 0;
-}
-
-.step-title {
-  width: 260px;
-  flex-shrink: 0;
-}
-
-.step-exe-display {
-  font-size: 12px;
-  color: var(--text-3);
-  max-width: 280px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.step-cmd {
-  width: 220px;
-  flex-shrink: 0;
-}
-
-.step-args {
-  width: 260px;
-  flex-shrink: 0;
-}
-
-.step-click-title {
-  width: 200px;
-  flex-shrink: 0;
-}
-
-.step-axis {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-md);
-  padding: 4px 8px;
-  background: rgba(255, 255, 255, 0.03);
-}
-
-.step-axis-label {
-  font-size: 11px;
-  font-weight: 700;
-  color: var(--text-3);
-  width: 14px;
-}
-
-.step-axis-num {
-  width: 96px;
-  flex-shrink: 0;
-}
-
+/* 各步骤编辑器共用小按钮样式（.pick-btn 基础样式见 styles/style.css）。 */
 .pick-btn.small {
   height: 34px;
   padding: 0 10px;
   font-size: 12px;
-}
-
-.rec-btn.recording,
-.pick-btn.recording {
-  border-color: var(--accent);
-  color: var(--accent);
-}
-
-.step-hint {
-  color: var(--text-3);
-  font-size: 12px;
-}
-
-/* ---------- 条件分叉 ---------- */
-
-.step-if {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  width: 100%;
-  border: 1px solid rgba(192, 132, 252, 0.35);
-  border-radius: 10px;
-  padding: 10px;
-  background: rgba(192, 132, 252, 0.05);
-}
-
-.step-if-head {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  flex-wrap: wrap;
-}
-
-.step-if-kw {
-  font-family: "Cascadia Code", Consolas, monospace;
-  font-weight: 700;
-  color: #c084fc;
-  font-size: 13px;
-}
-
-.step-if-value {
-  width: 160px;
-  font-family: "Cascadia Code", Consolas, monospace;
-}
-
-.step-if-expected {
-  width: 160px;
-  font-family: "Cascadia Code", Consolas, monospace;
-}
-
-.step-branch {
-  border-left: 2px solid rgba(192, 132, 252, 0.3);
-  padding-left: 10px;
-  margin-left: 4px;
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-
-.step-branch-label {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  font-family: "Cascadia Code", Consolas, monospace;
-  font-size: 12px;
-  font-weight: 700;
-  color: #c084fc;
-}
-
-.step-branch-del {
-  width: 22px;
-  height: 22px;
-  border: none;
-  border-radius: 6px;
-  background: transparent;
-  color: var(--text-3);
-  cursor: pointer;
-  line-height: 1;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  transition: background 0.15s, color 0.15s;
-}
-
-.step-branch-del:hover {
-  background: rgba(248, 113, 113, 0.18);
-  color: var(--red);
 }
 </style>

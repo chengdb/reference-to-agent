@@ -12,7 +12,7 @@ use tauri::{AppHandle, Emitter, LogicalSize, Manager, PhysicalPosition, State, W
 use tauri_plugin_global_shortcut::{GlobalShortcutExt, Shortcut as GsShortcut, ShortcutState};
 
 use config::{Config, MenuConfig, Recipe};
-use actions::{AxisPos, ConfirmChoice, Step, describe_step};
+use actions::{AxisPos, ConfirmChoice, RunError, Step, describe_step};
 
 /// 弹出层类型：圆盘菜单 / 完整配方列表。用于失败后恢复用户正在使用的弹出层。
 #[derive(Clone, Copy, PartialEq)]
@@ -84,110 +84,100 @@ fn show_main(app: &AppHandle) {
     }
 }
 
-/// 在鼠标位置弹出菜单，并记录当前前台窗口用于执行后恢复。
-fn show_menu(app: &AppHandle) -> Result<(), String> {
-    let state = app.state::<AppState>();
-    let menu_win = app.get_webview_window("menu").ok_or("菜单窗口不存在")?;
-    let main_win = app.get_webview_window("main").ok_or("主窗口不存在")?;
-
-    // 菜单已显示则收起（toggle）。
-    if menu_win.is_visible().unwrap_or(false) {
-        hide_list(app);
-        let _ = menu_win.hide();
-        return Ok(());
-    }
-    // 显示菜单前收起列表，避免两个弹出层叠放。
-    hide_list(app);
-
-    // 按配置调整菜单窗口尺寸（逻辑像素，与前端 CSS px 一致，避免 DPI 缩放偏差）。
-    resize_menu_window(app, {
-        let cfg = state.config.lock().unwrap();
-        cfg.menu.size.max(100)
-    });
-
+/// 记录弹出层显示前的前台窗口（排除自身窗口），用于配方执行后恢复焦点。
+fn record_prev_foreground(app: &AppHandle) {
     let fg = win::current_foreground();
-    if fg != 0 {
-        let fg_pid = win::window_pid(fg);
-        let self_pids = [
-            menu_win.hwnd().ok().map(|h| win::window_pid(h.0 as isize)),
-            main_win.hwnd().ok().map(|h| win::window_pid(h.0 as isize)),
-        ];
-        if !self_pids.iter().flatten().any(|p| *p == fg_pid) {
-            *state.prev_foreground.lock().unwrap() = Some(fg);
-        }
+    if fg == 0 {
+        return;
     }
-
-    let pos = win::cursor_pos().ok_or("无法获取鼠标位置")?;
-    let size = menu_win.inner_size().map_err(|e| e.to_string())?;
-    // 窗口中心对准鼠标位置。
-    menu_win
-        .set_position(PhysicalPosition::new(
-            pos.x - (size.width / 2) as i32,
-            pos.y - (size.height / 2) as i32,
-        ))
-        .map_err(|e| e.to_string())?;
-    menu_win.show().map_err(|e| e.to_string())?;
-    let _ = menu_win.set_focus();
-    *state.last_popup.lock().unwrap() = PopupKind::Menu;
-    // 窗口显示后再通知前端刷新配置（隐藏时前端可能收不到事件）。
-    let _ = app.emit_to("menu", "menu-updated", ());
-    // 鼠标保持在圆盘中心，方便向各方向移动选择。
-    let _ = win::set_cursor_pos(pos.x, pos.y);
-    Ok(())
+    let fg_pid = win::window_pid(fg);
+    let own = ["main", "menu", "list"].iter().any(|label| {
+        app.get_webview_window(label)
+            .and_then(|w| w.hwnd().ok())
+            .map(|h| win::window_pid(h.0 as isize) == fg_pid)
+            .unwrap_or(false)
+    });
+    if !own {
+        *app.state::<AppState>().prev_foreground.lock().unwrap() = Some(fg);
+    }
 }
 
-/// 在鼠标附近弹出完整配方列表，并记录当前前台窗口用于执行后恢复。
-fn show_recipe_list(app: &AppHandle) -> Result<(), String> {
-    let state = app.state::<AppState>();
-    let list_win = app.get_webview_window("list").ok_or("配方列表窗口不存在")?;
-    let main_win = app.get_webview_window("main").ok_or("主窗口不存在")?;
-    let menu_win = app.get_webview_window("menu").ok_or("菜单窗口不存在")?;
+/// 在鼠标位置弹出指定弹出层（圆盘菜单 / 完整配方列表）。
+/// 已显示时收起（toggle）；显示前记录当前前台窗口用于执行后恢复。
+fn show_popup(app: &AppHandle, kind: PopupKind) -> Result<(), String> {
+    let (label, other) = match kind {
+        PopupKind::Menu => ("menu", "list"),
+        PopupKind::List => ("list", "menu"),
+    };
+    let popup = app
+        .get_webview_window(label)
+        .ok_or_else(|| format!("弹出窗口 {label} 不存在"))?;
 
-    // 列表已显示则收起（toggle）。
-    if list_win.is_visible().unwrap_or(false) {
-        let _ = list_win.hide();
+    // 已显示则收起（toggle），同时收起另一个弹出层。
+    if popup.is_visible().unwrap_or(false) {
+        if let Some(w) = app.get_webview_window(other) {
+            let _ = w.hide();
+        }
+        let _ = popup.hide();
         return Ok(());
     }
-    // 显示列表前收起圆盘，避免两个弹出层叠放。
-    hide_menu(app);
-
-    let fg = win::current_foreground();
-    if fg != 0 {
-        let fg_pid = win::window_pid(fg);
-        let self_pids = [
-            list_win.hwnd().ok().map(|h| win::window_pid(h.0 as isize)),
-            main_win.hwnd().ok().map(|h| win::window_pid(h.0 as isize)),
-            menu_win.hwnd().ok().map(|h| win::window_pid(h.0 as isize)),
-        ];
-        if !self_pids.iter().flatten().any(|p| *p == fg_pid) {
-            *state.prev_foreground.lock().unwrap() = Some(fg);
-        }
+    // 显示前收起另一个弹出层，避免两个弹出层叠放。
+    if let Some(w) = app.get_webview_window(other) {
+        let _ = w.hide();
     }
+
+    // 圆盘菜单需按配置同步窗口尺寸（逻辑像素，与前端 CSS px 一致，避免 DPI 缩放偏差）。
+    if kind == PopupKind::Menu {
+        resize_menu_window(app, {
+            let state = app.state::<AppState>();
+            let cfg = state.config.lock().unwrap();
+            cfg.menu.size.max(100)
+        });
+    }
+
+    record_prev_foreground(app);
 
     let pos = win::cursor_pos().ok_or("无法获取鼠标位置")?;
-    let size = list_win.inner_size().map_err(|e| e.to_string())?;
-    let (w, h) = (size.width as i32, size.height as i32);
-    // 列表左上角从鼠标右下偏移弹出；超出光标所在显示器工作区时向内收拢，保证可见。
-    let mut x = pos.x + 16;
-    let mut y = pos.y + 16;
-    if let Some(area) = win::work_area_at(pos.x, pos.y) {
-        if x + w > area.right {
-            x = pos.x - 16 - w;
+    let size = popup.inner_size().map_err(|e| e.to_string())?;
+    match kind {
+        PopupKind::Menu => {
+            // 窗口中心对准鼠标位置。
+            popup
+                .set_position(PhysicalPosition::new(
+                    pos.x - (size.width / 2) as i32,
+                    pos.y - (size.height / 2) as i32,
+                ))
+                .map_err(|e| e.to_string())?;
         }
-        if y + h > area.bottom {
-            y = pos.y - 16 - h;
+        PopupKind::List => {
+            let (w, h) = (size.width as i32, size.height as i32);
+            // 列表左上角从鼠标右下偏移弹出；超出光标所在显示器工作区时向内收拢，保证可见。
+            let mut x = pos.x + 16;
+            let mut y = pos.y + 16;
+            if let Some(area) = win::work_area_at(pos.x, pos.y) {
+                if x + w > area.right {
+                    x = pos.x - 16 - w;
+                }
+                if y + h > area.bottom {
+                    y = pos.y - 16 - h;
+                }
+                x = x.clamp(area.left, (area.right - w).max(area.left));
+                y = y.clamp(area.top, (area.bottom - h).max(area.top));
+            }
+            popup
+                .set_position(PhysicalPosition::new(x, y))
+                .map_err(|e| e.to_string())?;
         }
-        x = x.clamp(area.left, (area.right - w).max(area.left));
-        y = y.clamp(area.top, (area.bottom - h).max(area.top));
     }
-    list_win
-        .set_position(PhysicalPosition::new(x, y))
-        .map_err(|e| e.to_string())?;
-    list_win.show().map_err(|e| e.to_string())?;
-    let _ = list_win.set_focus();
-    *state.last_popup.lock().unwrap() = PopupKind::List;
-    // 窗口显示后再通知前端刷新配方列表。
-    let _ = app.emit_to("list", "list-updated", ());
+    popup.show().map_err(|e| e.to_string())?;
+    let _ = popup.set_focus();
+    *app.state::<AppState>().last_popup.lock().unwrap() = kind;
+    // 窗口显示后再通知前端刷新（隐藏时前端可能收不到事件）。
+    let _ = app.emit_to(label, &format!("{label}-updated"), ());
+    if kind == PopupKind::Menu {
+        // 鼠标保持在圆盘中心，方便向各方向移动选择。
+        let _ = win::set_cursor_pos(pos.x, pos.y);
+    }
     Ok(())
 }
 
@@ -210,7 +200,7 @@ fn apply_hotkeys(app: &AppHandle) -> Result<(), String> {
                 show_toast(app, "配方正在执行中");
                 return;
             }
-            let _ = show_menu(app);
+            let _ = show_popup(app, PopupKind::Menu);
         }
     })
     .map_err(|e| e.to_string())?;
@@ -228,7 +218,7 @@ fn apply_hotkeys(app: &AppHandle) -> Result<(), String> {
                         show_toast(app, "配方正在执行中");
                         return;
                     }
-                    let _ = show_recipe_list(app);
+                    let _ = show_popup(app, PopupKind::List);
                 }
             })
             .map_err(|e| e.to_string())?;
@@ -324,12 +314,12 @@ async fn run_recipe(app: AppHandle, state: State<'_, AppState>, name: String) ->
     // 串行化 + 执行：在阻塞线程内获取并持有互斥锁，避免 async 未来持有非 Send 的
     // MutexGuard（确认流程会在等待用户按键时阻塞该线程，但不会卡住主事件循环）。
     let app2 = app.clone();
-    let result: Result<(), String> = tauri::async_runtime::spawn_blocking(move || {
+    let result: Result<(), RunError> = tauri::async_runtime::spawn_blocking(move || {
         let state = app2.state::<AppState>();
         let _guard = state
             .exec_lock
             .try_lock()
-            .map_err(|_| "已有配方正在执行，请等待完成后再试")?;
+            .map_err(|_| RunError::Failed("已有配方正在执行，请等待完成后再试".to_string()))?;
         // 确认回调：run_steps_confirmed 已按「配方开关 + 步骤开关」双重过滤，
         // 走到这里说明需要弹窗等待用户按键。
         let mut ask = |seq: usize, step: &Step| {
@@ -347,26 +337,21 @@ async fn run_recipe(app: AppHandle, state: State<'_, AppState>, name: String) ->
         let _ = win.hide();
     }
 
-    if result.is_err() {
-        let msg = result.as_ref().unwrap_err();
-        if msg == actions::CANCELED {
+    match &result {
+        Err(RunError::Canceled) => {
             // 用户取消：不重弹菜单/列表，只显示取消提示，3 秒后自动关闭。
             crate::debug_log!("run_recipe: user cancelled");
-            show_cancel_toast(&app, msg);
+            show_cancel_toast(&app, &RunError::Canceled.to_string());
             return Ok(());
         }
-        // 执行失败：重新弹出用户正在使用的弹出层，前端在 status 里展示原因。
-        let kind = *state.last_popup.lock().unwrap();
-        match kind {
-            PopupKind::Menu => {
-                let _ = show_menu(&app);
-            }
-            PopupKind::List => {
-                let _ = show_recipe_list(&app);
-            }
+        Err(RunError::Failed(_)) => {
+            // 执行失败：重新弹出用户正在使用的弹出层，前端在 status 里展示原因。
+            let kind = *state.last_popup.lock().unwrap();
+            let _ = show_popup(&app, kind);
         }
+        Ok(()) => {}
     }
-    result
+    result.map_err(|e| e.to_string())
 }
 
 /// 取消执行后的轻提示：复用提示窗口显示一条消息，3 秒后自动关闭，不抢占焦点。

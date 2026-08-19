@@ -2,7 +2,8 @@
 import { ref } from "vue";
 import Radial from "../ui/Radial.vue";
 import Select from "../ui/Select.vue";
-import { useConfigStore } from "../../composables/useConfigStore";
+import { useConfigState } from "../../composables/useConfigState";
+import { useMenuSlots } from "../../composables/useMenuSlots";
 
 const previewBgOptions = [
   { value: "dark", label: "暗色" },
@@ -11,9 +12,8 @@ const previewBgOptions = [
 ] as const;
 const previewBg = ref<"dark" | "light" | "transparent">("dark");
 
+const { cfg, activeSection } = useConfigState();
 const {
-  cfg,
-  activeSection,
   selectedSlot,
   orderedPreview,
   boundSlot,
@@ -34,7 +34,7 @@ const {
   clearSlotColor,
   setSlotShowIcon,
   setSlotShowLabel,
-} = useConfigStore();
+} = useMenuSlots();
 </script>
 
 <template>

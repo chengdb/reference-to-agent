@@ -1,7 +1,9 @@
 <script setup lang="ts">
-import { useConfigStore } from "../../composables/useConfigStore";
+import { useConfigState } from "../../composables/useConfigState";
+import { useHotkeyRecording } from "../../composables/useHotkeyRecording";
 
-const { cfg, activeSection, recording, startRecording } = useConfigStore();
+const { cfg, activeSection } = useConfigState();
+const { recording, startRecording } = useHotkeyRecording();
 </script>
 
 <template>

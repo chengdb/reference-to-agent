@@ -1,7 +1,7 @@
 <script setup lang="ts">
-import { useConfigStore } from "../../composables/useConfigStore";
+import { useConfigState } from "../../composables/useConfigState";
 
-const { activeSection, setSection } = useConfigStore();
+const { activeSection, setSection } = useConfigState();
 </script>
 
 <template>

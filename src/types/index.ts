@@ -1,3 +1,15 @@
+/**
+ * 配置与步骤的类型定义。
+ *
+ * ⚠️ 本文件与 Rust 端的 serde 结构手写对齐（单一事实来源在 Rust）：
+ * - 步骤/比较/if/click：src-tauri/src/actions.rs（Step、StepKind、CompareOp、IfBranch、Click、AxisPos）
+ * - 配方/菜单/整体配置：src-tauri/src/config.rs（Recipe、MenuSlot、MenuConfig、Config）
+ * Rust 端 config.rs 的 `config_json_contract` 测试锁定了 JSON 形态；
+ * 修改任何一侧字段时，必须同步另一侧并让该契约测试通过。
+ *
+ * 变量约定：聚焦/激活步骤写入的变量名见 actions.rs 的 VAR_TITLE 常量。
+ */
+
 export type Base = "left" | "right" | "top" | "bottom";
 export type Unit = "percent" | "px";
 
@@ -54,6 +66,9 @@ export type Step =
   | (StepFlags & { type: "click"; title: string; x: AxisPos; y: AxisPos })
   | (StepFlags & { type: "if"; op: CompareOp; value: string; expected: string; then: Step[]; elseIf: CompareBranch[]; else: Step[] })
   | (StepFlags & { type: "rollbackClipboard" });
+
+/** 步骤类型判别字段的联合（新增步骤类型时同步此处与 Rust StepKind）。 */
+export type StepType = Step["type"];
 
 export interface Recipe {
   name: string;

@@ -1,7 +1,7 @@
 <script setup lang="ts">
-import { useConfigStore } from "../../composables/useConfigStore";
+import { useAppPicker } from "../../composables/useAppPicker";
 
-const { picker, pickerSearch, filteredApps, pickApp, closePicker } = useConfigStore();
+const { picker, pickerSearch, filteredApps, pickApp, closePicker } = useAppPicker();
 </script>
 
 <template>

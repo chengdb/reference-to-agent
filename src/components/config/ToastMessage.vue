@@ -1,7 +1,7 @@
 <script setup lang="ts">
-import { useConfigStore } from "../../composables/useConfigStore";
+import { useToast } from "../../composables/useToast";
 
-const { toast } = useConfigStore();
+const { toast } = useToast();
 </script>
 
 <template>

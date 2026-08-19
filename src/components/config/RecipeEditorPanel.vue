@@ -1,18 +1,10 @@
 <script setup lang="ts">
 import StepList from "./StepList.vue";
-import { useConfigStore } from "../../composables/useConfigStore";
+import { useConfigState } from "../../composables/useConfigState";
+import { useRecipes } from "../../composables/useRecipes";
 
-const {
-  cfg,
-  activeSection,
-  current,
-  selectedIndex,
-  selectRecipe,
-  removeRecipe,
-  duplicateRecipe,
-  addRecipe,
-  save,
-} = useConfigStore();
+const { cfg, activeSection, current, selectedIndex, save } = useConfigState();
+const { selectRecipe, removeRecipe, duplicateRecipe, addRecipe } = useRecipes();
 </script>
 
 <template>

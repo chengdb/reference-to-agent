@@ -6,9 +6,13 @@ import RecipeEditorPanel from "../components/config/RecipeEditorPanel.vue";
 import MenuSettingsPanel from "../components/config/MenuSettingsPanel.vue";
 import AppPickerDialog from "../components/config/AppPickerDialog.vue";
 import ToastMessage from "../components/config/ToastMessage.vue";
-import { useConfigStore } from "../composables/useConfigStore";
+import { useConfigState } from "../composables/useConfigState";
+import { useHotkeyRecording } from "../composables/useHotkeyRecording";
+import { useStepTools } from "../composables/useStepTools";
 
-const { load, save, onKeydown, onCoordPickKeydown, loadError } = useConfigStore();
+const { load, save, loadError } = useConfigState();
+const { onKeydown } = useHotkeyRecording();
+const { onCoordPickKeydown } = useStepTools();
 
 onMounted(() => {
   load();

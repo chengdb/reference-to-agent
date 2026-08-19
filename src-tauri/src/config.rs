@@ -4,7 +4,12 @@ use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::PathBuf;
 
-use crate::actions::Step;
+use crate::actions::{Step, StepKind};
+
+/// 便捷构造一个步骤（默认配置用）。
+fn step(kind: StepKind) -> Step {
+    Step { confirm: false, kind }
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -136,18 +141,17 @@ impl Default for Config {
                     slots: Vec::new(),
                     confirm: false,
                     steps: vec![
-                        Step::Wait { ms: 50, confirm: false },
-                        Step::Hotkey { keys: "Ctrl+C".to_string(), confirm: false },
-                        Step::Wait { ms: 150, confirm: false },
-                        Step::ActivateApp {
+                        step(StepKind::Wait { ms: 50 }),
+                        step(StepKind::Hotkey { keys: "Ctrl+C".to_string() }),
+                        step(StepKind::Wait { ms: 150 }),
+                        step(StepKind::ActivateApp {
                             title: "Claude".to_string(),
                             exe: None,
-                            confirm: false,
-                        },
-                        Step::Wait { ms: 600, confirm: false },
-                        Step::Hotkey { keys: "Ctrl+V".to_string(), confirm: false },
-                        Step::Wait { ms: 400, confirm: false },
-                        Step::Hotkey { keys: "Enter".to_string(), confirm: false },
+                        }),
+                        step(StepKind::Wait { ms: 600 }),
+                        step(StepKind::Hotkey { keys: "Ctrl+V".to_string() }),
+                        step(StepKind::Wait { ms: 400 }),
+                        step(StepKind::Hotkey { keys: "Enter".to_string() }),
                     ],
                 },
                 Recipe {
@@ -155,18 +159,17 @@ impl Default for Config {
                     slots: Vec::new(),
                     confirm: false,
                     steps: vec![
-                        Step::Wait { ms: 50, confirm: false },
-                        Step::Hotkey { keys: "Ctrl+Shift+C".to_string(), confirm: false },
-                        Step::Wait { ms: 150, confirm: false },
-                        Step::ActivateApp {
+                        step(StepKind::Wait { ms: 50 }),
+                        step(StepKind::Hotkey { keys: "Ctrl+Shift+C".to_string() }),
+                        step(StepKind::Wait { ms: 150 }),
+                        step(StepKind::ActivateApp {
                             title: "Claude".to_string(),
                             exe: None,
-                            confirm: false,
-                        },
-                        Step::Wait { ms: 600, confirm: false },
-                        Step::Hotkey { keys: "Ctrl+V".to_string(), confirm: false },
-                        Step::Wait { ms: 400, confirm: false },
-                        Step::Hotkey { keys: "Enter".to_string(), confirm: false },
+                        }),
+                        step(StepKind::Wait { ms: 600 }),
+                        step(StepKind::Hotkey { keys: "Ctrl+V".to_string() }),
+                        step(StepKind::Wait { ms: 400 }),
+                        step(StepKind::Hotkey { keys: "Enter".to_string() }),
                     ],
                 },
             ],
@@ -304,4 +307,96 @@ pub fn save(path: &PathBuf, cfg: &Config) -> Result<(), String> {
     let tmp = path.with_extension("json.tmp");
     fs::write(&tmp, &json).map_err(|e| e.to_string())?;
     fs::rename(&tmp, path).map_err(|e| e.to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn migrate_moves_recipe_slots_to_menu() {
+        let mut cfg = Config::default();
+        // 旧格式：配方自带 slots，菜单无绑定 → 触发迁移。
+        cfg.menu.slots = vec![];
+        cfg.recipes[0].slots = vec![1, 3];
+        cfg.recipes[1].slots = vec![3]; // 与配方 0 冲突，先到先得
+        migrate(&mut cfg);
+        assert_eq!(cfg.menu.slots.len(), cfg.menu.sectors as usize);
+        assert_eq!(cfg.menu.slots[1].as_ref().unwrap().recipe, Some(0));
+        assert_eq!(cfg.menu.slots[3].as_ref().unwrap().recipe, Some(0));
+        assert!(cfg.menu.slots[0].is_none());
+        // 旧字段已清空。
+        assert!(cfg.recipes.iter().all(|r| r.slots.is_empty()));
+    }
+
+    #[test]
+    fn migrate_skipped_when_menu_already_bound() {
+        let mut cfg = Config::default();
+        // 菜单已有绑定（默认配置即如此）→ 不迁移，只清旧字段。
+        let before = cfg.menu.slots.clone();
+        cfg.recipes[0].slots = vec![5];
+        migrate(&mut cfg);
+        assert_eq!(
+            before.iter().map(|s| s.as_ref().and_then(|m| m.recipe)).collect::<Vec<_>>(),
+            cfg.menu.slots.iter().map(|s| s.as_ref().and_then(|m| m.recipe)).collect::<Vec<_>>()
+        );
+        assert!(cfg.recipes.iter().all(|r| r.slots.is_empty()));
+    }
+
+    /// JSON 形态契约：前端 src/types/index.ts 依据本结构手写类型，
+    /// 此处锁定序列化键名与步骤形态；改动本测试意味着需要同步前端类型。
+    #[test]
+    fn config_json_contract() {
+        let v = serde_json::to_value(Config::default()).unwrap();
+        assert!(v.get("globalHotkey").is_some());
+        assert!(v.get("listHotkey").is_some());
+        assert!(v.get("recipes").is_some());
+
+        let menu = &v["menu"];
+        assert!(menu.get("size").is_some());
+        assert!(menu.get("sectors").is_some());
+        assert!(menu.get("showLabels").is_some());
+        assert!(menu.get("slots").is_some());
+
+        let menu_slot = menu["slots"].as_array().unwrap().iter().find_map(|s| {
+            let s = s.as_object()?;
+            s.get("recipe").map(|_| s)
+        });
+        assert!(menu_slot.is_some(), "默认菜单应至少有一个绑定扇区");
+
+        let recipe = &v["recipes"][0];
+        assert!(recipe.get("name").is_some());
+        assert!(recipe.get("steps").is_some());
+        // 旧字段 slots 为空时不序列化。
+        assert!(recipe.get("slots").is_none());
+
+        // 步骤形态：tag 在 "type"，confirm 平铺顶层。
+        let hotkey = &recipe["steps"][1];
+        assert_eq!(hotkey["type"], "hotkey");
+        assert_eq!(hotkey["keys"], "Ctrl+C");
+        assert_eq!(hotkey["confirm"], false);
+    }
+
+    /// 旧版配置（步骤变体自带 confirm、menu.slots 为空）可以无损读入并迁移绑定。
+    #[test]
+    fn legacy_config_deserializes() {
+        let raw = r#"{
+            "globalHotkey": "Ctrl+Alt+R",
+            "menu": { "size": 400, "sectors": 8, "showLabels": true, "slots": [] },
+            "recipes": [{
+                "name": "旧配方",
+                "slots": [2],
+                "steps": [
+                    { "type": "wait", "ms": 50, "confirm": false },
+                    { "type": "pasteText", "text": "hi", "confirm": true },
+                    { "type": "click", "title": "A", "corner": "topLeft", "rx": 0.1, "ry": 0.2 }
+                ]
+            }]
+        }"#;
+        let mut cfg: Config = serde_json::from_str(raw).unwrap();
+        assert_eq!(cfg.list_hotkey, "Ctrl+Alt+L"); // 默认补全
+        migrate(&mut cfg);
+        assert_eq!(cfg.menu.slots[2].as_ref().unwrap().recipe, Some(0));
+        assert!(cfg.recipes[0].steps[1].confirm);
+    }
 }

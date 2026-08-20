@@ -36,8 +36,8 @@ Windows 桌面小工具：在 IDE 中选中代码（或复制文件路径）后�
 |---|---|---|
 | `wait` | `ms` | 等待毫秒数 |
 | `hotkey` | `keys` | 注入组合键，如 `Ctrl+Shift+C`、`Enter`、`Alt+Tab` |
-| `activateApp` | `title`、`exe?` | 按标题模糊匹配激活窗口；未找到且给了 `exe` 时先启动该程序并等待窗口出现（商店应用传 `shell:AppsFolder\<AUMID>`） |
-| `focusApp` | `title` | 聚焦已打开的应用窗口（按标题模糊匹配，不启动新进程） |
+| `activateApp` | `title`、`exe?` | 按标题模糊匹配激活窗口；未找到且给了 `exe` 时先启动该程序并等待窗口出现（商店应用传 `shell:AppsFolder\<AUMID>`）。多个同应用窗口时优先当前虚拟桌面、再取最近激活的窗口 |
+| `focusApp` | `title` | 聚焦已打开的应用窗口（按标题模糊匹配，不启动新进程）。多个同应用窗口时优先当前虚拟桌面、再取最近激活的窗口 |
 | `setClipboard` | `text` | 写入剪贴板 |
 | `typeText` | `text` | 逐字输入文本（受输入法影响，慎用于中文） |
 | `pasteText` | `text` | 写入剪贴板并粘贴（对中文/长文本可靠） |

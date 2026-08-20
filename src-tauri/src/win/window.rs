@@ -1,10 +1,16 @@
 //! 窗口查找、标题/PID 读取、前台切换与显示器工作区。
 
+use std::ffi::c_void;
 use std::ptr::null_mut;
 use std::thread;
 use std::time::Duration;
 
+use windows_sys::core::GUID;
 use windows_sys::Win32::Foundation::{BOOL, CloseHandle, HWND, LPARAM, POINT, RECT};
+use windows_sys::Win32::System::Com::{
+    CoCreateInstance, CoInitializeEx, CoUninitialize, CLSCTX_ALL, COINIT_APARTMENTTHREADED,
+};
+use windows_sys::Win32::UI::Shell::VirtualDesktopManager;
 use windows_sys::Win32::Graphics::Gdi::{
     GetMonitorInfoW, MonitorFromPoint, MONITORINFO, MONITOR_DEFAULTTONEAREST,
 };
@@ -35,22 +41,128 @@ fn is_topmost(hwnd: isize) -> bool {
     }
 }
 
-/// 从按枚举（Z 序，顶层在前）顺序排列的候选里，挑出“最近激活”的一个：
-/// 优先当前前台窗口（精确命中）；其次取第一个非置顶窗口（普通主窗口即最近被带上前台的）；
-/// 都无则退而取第一个候选。空切片时各级返回 None，自然安全。
-fn pick_front_window(cands: &[isize]) -> Option<isize> {
+/// IVirtualDesktopManager 的 IID（{A5CD92FF-29BE-454C-8D04-D82879FB3F1B}）。
+/// windows-sys 0.52 未生成该 COM 接口的方法表，这里手工定义 vtable。
+const IID_I_VIRTUAL_DESKTOP_MANAGER: GUID =
+    GUID::from_u128(0xa5cd92ff_29be_454c_8d04_d82879fb3f1b);
+
+type VdRelease = unsafe extern "system" fn(*mut c_void) -> u32;
+type VdIsOnCurrentVirtualDesktop = unsafe extern "system" fn(*mut c_void, isize, *mut i32) -> i32;
+
+/// IVirtualDesktopManager 的 vtable 布局（IUnknown 三方法 + 三个接口方法）。
+#[repr(C)]
+struct IVirtualDesktopManagerVtbl {
+    _query_interface: usize,
+    _add_ref: usize,
+    release: VdRelease,
+    is_window_on_current_virtual_desktop: VdIsOnCurrentVirtualDesktop,
+    _get_window_desktop_id: usize,
+    _move_window_to_desktop: usize,
+}
+
+/// 「窗口是否在当前虚拟桌面」判定器（IVirtualDesktopManager，Win10+）。
+/// EnumWindows 会枚举到所有虚拟桌面的窗口，多桌面场景需要用它过滤。
+/// 创建失败（旧系统、COM 初始化失败等）时 mgr 为 None，is_current 一律返回 None，
+/// 调用方应视为「无法区分、不过滤」。Drop 时释放接口并按需 CoUninitialize。
+struct VirtualDesktopFilter {
+    mgr: Option<*mut c_void>,
+    own_com_init: bool,
+}
+
+impl VirtualDesktopFilter {
+    fn new() -> Self {
+        unsafe {
+            // S_OK(0) 表示本次由我们完成初始化，之后要配对 CoUninitialize；
+            // RPC_E_CHANGED_MODE（线程已被初始化为 MTA）等也照常尝试创建，
+            // VirtualDesktopManager 可跨套间使用，失败则降级为 None。
+            let hr_init = CoInitializeEx(null_mut(), COINIT_APARTMENTTHREADED as u32);
+            let own_com_init = hr_init == 0;
+            let mut mgr: *mut c_void = null_mut();
+            let hr = CoCreateInstance(
+                &VirtualDesktopManager,
+                null_mut(),
+                CLSCTX_ALL,
+                &IID_I_VIRTUAL_DESKTOP_MANAGER,
+                &mut mgr,
+            );
+            let mgr = if hr == 0 && !mgr.is_null() { Some(mgr) } else { None };
+            Self { mgr, own_com_init }
+        }
+    }
+
+    /// 窗口是否在当前虚拟桌面；查询失败返回 None（调用方按「不过滤」处理）。
+    fn is_current(&self, hwnd: isize) -> Option<bool> {
+        unsafe {
+            let mgr = self.mgr?;
+            let vtbl = *(mgr as *const *const IVirtualDesktopManagerVtbl);
+            let mut on: i32 = 0;
+            let hr = ((*vtbl).is_window_on_current_virtual_desktop)(mgr, hwnd, &mut on);
+            if hr == 0 {
+                Some(on != 0)
+            } else {
+                None
+            }
+        }
+    }
+}
+
+impl Drop for VirtualDesktopFilter {
+    fn drop(&mut self) {
+        unsafe {
+            if let Some(mgr) = self.mgr.take() {
+                let vtbl = *(mgr as *const *const IVirtualDesktopManagerVtbl);
+                ((*vtbl).release)(mgr);
+            }
+            if self.own_com_init {
+                CoUninitialize();
+            }
+        }
+    }
+}
+
+/// 从按枚举（Z 序，顶层在前）顺序排列的候选里挑一个，优先级：
+/// 1. 当前前台窗口（精确命中）；
+/// 2. 当前虚拟桌面上的候选：第一个非置顶窗口（普通主窗口即最近被带上前台的），否则第一个；
+/// 3. 其他虚拟桌面上的候选：同上规则兜底。
+/// 虚拟桌面判定不可用时所有候选都落入「当前桌面」桶，行为与未区分桌面时一致。
+/// vd 为惰性槽：只有候选超过 1 个、确实需要区分桌面时才创建 COM 对象，
+/// 同一轮查找的多个匹配桶共享同一个实例，避免重复 CoCreateInstance 开销。
+fn pick_front_window(cands: &[isize], vd: &mut Option<VirtualDesktopFilter>) -> Option<isize> {
     let fg = current_foreground();
+    if let Some(h) = cands.iter().copied().find(|&h| h == fg) {
+        return Some(h);
+    }
+    // 0/1 个候选时桌面分桶不影响结果，直接返回，省掉 COM 初始化。
+    if cands.len() <= 1 {
+        return pick_from_bucket(cands);
+    }
+    let vd = vd.get_or_insert_with(VirtualDesktopFilter::new);
+    let mut current_desktop: Vec<isize> = Vec::new();
+    let mut other_desktop: Vec<isize> = Vec::new();
+    for &h in cands {
+        // 判定失败按「在当前桌面」处理，避免把窗口误过滤掉。
+        if vd.is_current(h).unwrap_or(true) {
+            current_desktop.push(h);
+        } else {
+            other_desktop.push(h);
+        }
+    }
+    pick_from_bucket(&current_desktop).or_else(|| pick_from_bucket(&other_desktop))
+}
+
+/// 桶内挑选：优先第一个非置顶窗口，兜底取第一个。空切片自然返回 None。
+fn pick_from_bucket(cands: &[isize]) -> Option<isize> {
     cands
         .iter()
         .copied()
-        .find(|&h| h == fg)
-        .or_else(|| cands.iter().copied().find(|&h| !is_topmost(h)))
+        .find(|&h| !is_topmost(h))
         .or_else(|| cands.first().copied())
 }
 
 /// 按标题查找目标窗口。优先级：完全相等 > 前缀匹配 > 包含匹配；忽略大小写；
-/// 跳过不可见窗口与工具窗口。同一匹配级别有多个窗口时，优先「最近激活」的那一个
-/// （当前前台窗口 > Z 序最前的非置顶窗口），避免同标题多实例误中陈旧窗口。
+/// 跳过不可见窗口与工具窗口。同一匹配级别有多个窗口时，优先「当前虚拟桌面」
+/// 再按「最近激活」（当前前台窗口 > Z 序最前的非置顶窗口），
+/// 避免多桌面/多实例场景误中其他桌面或陈旧的窗口。
 pub fn find_window_by_title(title: &str) -> Option<isize> {
     let needle = title.trim().to_lowercase();
     if needle.is_empty() {
@@ -88,9 +200,11 @@ pub fn find_window_by_title(title: &str) -> Option<isize> {
             contains.push(h);
         }
     }
-    pick_front_window(&exact)
-        .or_else(|| pick_front_window(&prefix))
-        .or_else(|| pick_front_window(&contains))
+    // 惰性共享同一个虚拟桌面判定器：哪个桶先出现多候选才创建。
+    let mut vd: Option<VirtualDesktopFilter> = None;
+    pick_front_window(&exact, &mut vd)
+        .or_else(|| pick_front_window(&prefix, &mut vd))
+        .or_else(|| pick_front_window(&contains, &mut vd))
 }
 
 /// 读取窗口标题（GetWindowTextW 的 UTF-16 解码）。访问某些进程的窗口可能失败，返回 None。
@@ -162,8 +276,9 @@ unsafe extern "system" fn collect_proc(hwnd: HWND, lparam: LPARAM) -> BOOL {
     1
 }
 
-/// 按进程 exe 路径精确匹配已打开的窗口；跳过工具窗口，多实例时优先选「最近激活」的那个：
-/// 当前前台窗口 > Z 序最前（最近带上前面）的非工具窗口；工具窗口仅作兜底。
+/// 按进程 exe 路径精确匹配已打开的窗口；跳过工具窗口，多实例时优先「当前虚拟桌面」，
+/// 再按「最近激活」选择：当前前台窗口 > Z 序最前（最近带上前面）的非工具窗口；
+/// 工具窗口仅作兜底。
 pub fn find_window_by_exe(exe: &str) -> Option<isize> {
     let needle = exe.trim();
     if needle.is_empty() {
@@ -175,23 +290,30 @@ pub fn find_window_by_exe(exe: &str) -> Option<isize> {
         EnumWindows(Some(collect_proc), &mut data as *mut _ as LPARAM);
     }
 
-    // 收集「可见、exe 精确相等」的候选，保持枚举（Z 序）顺序；工具窗口单独兜底。
-    let mut primary: Vec<isize> = Vec::new();
-    let mut fallback: Vec<isize> = Vec::new();
-    for &h in &data.out {
-        let matches = window_process_path(h)
+    // 收集「可见、exe 精确相等」的候选，保持枚举（Z 序）顺序。
+    // OpenProcess + QueryFullProcessImageNameW 开销较大，工具窗口仅作兜底，
+    // 先只查常规窗口；常规窗口一个都不匹配时，才为工具窗口付出进程查询开销。
+    let exe_matches = |h: isize| {
+        window_process_path(h)
             .map(|p| p.to_lowercase() == needle)
-            .unwrap_or(false);
-        if !matches {
-            continue;
-        }
+            .unwrap_or(false)
+    };
+    let mut primary: Vec<isize> = Vec::new();
+    let mut tool_windows: Vec<isize> = Vec::new();
+    for &h in &data.out {
         if is_tool_window(h) {
-            fallback.push(h);
-        } else {
+            tool_windows.push(h);
+        } else if exe_matches(h) {
             primary.push(h);
         }
     }
-    pick_front_window(&primary).or_else(|| pick_front_window(&fallback))
+    let fallback: Vec<isize> = if primary.is_empty() {
+        tool_windows.into_iter().filter(|&h| exe_matches(h)).collect()
+    } else {
+        Vec::new()
+    };
+    let mut vd: Option<VirtualDesktopFilter> = None;
+    pick_front_window(&primary, &mut vd).or_else(|| pick_front_window(&fallback, &mut vd))
 }
 
 /// 将窗口设为前台（绕过 Windows 前台锁的通用技巧）。

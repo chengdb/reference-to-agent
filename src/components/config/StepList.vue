@@ -60,9 +60,8 @@ function onTypeChange(step: EditableStep, t: StepType) {
           />
           <component :is="EDITORS[step.type]" :step="step" />
         </div>
-        <div class="step-controls">
+        <div class="step-confirm-group" v-if="step.type !== 'wait'">
           <label
-            v-if="step.type !== 'wait'"
             class="step-confirm-toggle"
             :class="{ checked: step.confirm }"
             title="勾选后，该步骤执行前会弹出确认（需配方已启用「人工确认」，Enter 执行 / Esc 取消）"
@@ -70,6 +69,8 @@ function onTypeChange(step: EditableStep, t: StepType) {
             <input type="checkbox" v-model="step.confirm" />
             <span>确认</span>
           </label>
+        </div>
+        <div class="step-controls">
           <StepInfoPopover :step-type="step.type" />
           <button title="上移" :disabled="si === 0" @click="moveStep(steps, si, -1)">
             <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M18 15l-6-6-6 6" /></svg>
@@ -203,6 +204,23 @@ function onTypeChange(step: EditableStep, t: StepType) {
   accent-color: var(--accent);
   cursor: pointer;
   margin: 0;
+}
+
+.step-confirm-group {
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+  margin-left: auto;
+  align-self: center;
+  padding: 3px;
+  border: 1px solid var(--border);
+  border-radius: 11px;
+  background: rgba(255, 255, 255, 0.04);
+}
+
+/* 确认组存在时，右对齐由它负责，操作组紧跟其后。 */
+.step-confirm-group + .step-controls {
+  margin-left: 0;
 }
 
 .step-controls {

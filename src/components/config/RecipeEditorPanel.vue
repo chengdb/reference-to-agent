@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import StepList from "./StepList.vue";
+import InfoPopover from "../ui/InfoPopover.vue";
 import { useConfigState } from "../../composables/useConfigState";
 import { useRecipes } from "../../composables/useRecipes";
 
@@ -37,18 +38,16 @@ const { selectRecipe, removeRecipe, duplicateRecipe, addRecipe } = useRecipes();
     <div v-if="current" class="recipe-edit">
       <div class="recipe-name-row">
         <input v-model="current.name" class="config-input recipe-name" placeholder="配方名称" />
-        <label
-          class="recipe-confirm-toggle"
-          title="启用后，步骤中勾选了「确认」的步骤会在执行前弹出确认（Enter 执行 / Esc 取消）"
-        >
+        <label class="recipe-confirm-toggle">
           <input type="checkbox" v-model="current.confirm" />
           <span>人工确认</span>
+          <InfoPopover
+            title="人工确认"
+            text="启用后，步骤中勾选了「确认」的步骤会在执行前弹出确认，按 Enter 执行、Esc 取消。"
+          />
         </label>
         <button class="btn btn-primary recipe-save" @click="save">保存配方</button>
       </div>
-      <p v-if="current.confirm" class="recipe-confirm-hint">
-        已启用人工确认：步骤勾选「确认」后，执行到该步骤前会询问，按 Enter 执行、Esc 取消。
-      </p>
       <StepList :steps="current.steps" />
     </div>
     <div v-else class="recipe-edit empty">选择一个配方进行编辑，或点击「+ 添加配方」</div>
@@ -277,11 +276,5 @@ const { selectRecipe, removeRecipe, duplicateRecipe, addRecipe } = useRecipes();
 .recipe-confirm-toggle input {
   accent-color: var(--accent);
   cursor: pointer;
-}
-
-.recipe-confirm-hint {
-  margin: -6px 0 0;
-  font-size: 11.5px;
-  color: var(--yellow);
 }
 </style>

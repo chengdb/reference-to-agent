@@ -13,7 +13,7 @@ const DEFAULT_MENU: MenuConfig = {
   size: 400,
   sectors: 8,
   showLabels: true,
-  slots: [{ recipe: 0 }, { recipe: 1 }],
+  slots: [],
 };
 
 /** 编辑中的整体配置（单一共享响应式对象，各域 composable 围绕它工作）。 */

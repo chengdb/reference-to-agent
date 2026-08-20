@@ -4,12 +4,7 @@ use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::PathBuf;
 
-use crate::actions::{Step, StepKind};
-
-/// 便捷构造一个步骤（默认配置用）。
-fn step(kind: StepKind) -> Step {
-    Step { confirm: false, kind }
-}
+use crate::actions::Step;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -76,24 +71,8 @@ impl Default for MenuConfig {
             size: default_menu_size(),
             sectors: default_menu_sectors(),
             show_labels: default_show_labels(),
-            slots: vec![
-                Some(MenuSlot {
-                    recipe: Some(0),
-                    label: None,
-                    color: None,
-                    icon: None,
-                    label_size: None,
-                    label_color: None,
-                }),
-                Some(MenuSlot {
-                    recipe: Some(1),
-                    label: None,
-                    color: None,
-                    icon: None,
-                    label_size: None,
-                    label_color: None,
-                }),
-            ],
+            // 不预绑定任何扇区：菜单绑定完全由用户配置。
+            slots: vec![],
         }
     }
 }
@@ -135,44 +114,8 @@ impl Default for Config {
             global_hotkey: "Ctrl+Alt+R".to_string(),
             list_hotkey: default_list_hotkey(),
             menu: MenuConfig::default(),
-            recipes: vec![
-                Recipe {
-                    name: "发送选中代码到 Claude".to_string(),
-                    slots: Vec::new(),
-                    confirm: false,
-                    steps: vec![
-                        step(StepKind::Wait { ms: 50 }),
-                        step(StepKind::Hotkey { keys: "Ctrl+C".to_string() }),
-                        step(StepKind::Wait { ms: 150 }),
-                        step(StepKind::ActivateApp {
-                            title: "Claude".to_string(),
-                            exe: None,
-                        }),
-                        step(StepKind::Wait { ms: 600 }),
-                        step(StepKind::Hotkey { keys: "Ctrl+V".to_string() }),
-                        step(StepKind::Wait { ms: 400 }),
-                        step(StepKind::Hotkey { keys: "Enter".to_string() }),
-                    ],
-                },
-                Recipe {
-                    name: "发送文件路径到 Claude".to_string(),
-                    slots: Vec::new(),
-                    confirm: false,
-                    steps: vec![
-                        step(StepKind::Wait { ms: 50 }),
-                        step(StepKind::Hotkey { keys: "Ctrl+Shift+C".to_string() }),
-                        step(StepKind::Wait { ms: 150 }),
-                        step(StepKind::ActivateApp {
-                            title: "Claude".to_string(),
-                            exe: None,
-                        }),
-                        step(StepKind::Wait { ms: 600 }),
-                        step(StepKind::Hotkey { keys: "Ctrl+V".to_string() }),
-                        step(StepKind::Wait { ms: 400 }),
-                        step(StepKind::Hotkey { keys: "Enter".to_string() }),
-                    ],
-                },
-            ],
+            // 不自带任何配方：首次安装从空白列表开始，由用户自行添加。
+            recipes: vec![],
         }
     }
 }
@@ -312,10 +255,41 @@ pub fn save(path: &PathBuf, cfg: &Config) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::actions::StepKind;
+
+    /// 测试用空配方。
+    fn recipe(name: &str) -> Recipe {
+        Recipe {
+            name: name.to_string(),
+            steps: vec![],
+            confirm: false,
+            slots: vec![],
+        }
+    }
+
+    /// 测试用菜单扇区绑定。
+    fn bound_slot(recipe: u16) -> Option<MenuSlot> {
+        Some(MenuSlot {
+            recipe: Some(recipe),
+            label: None,
+            color: None,
+            icon: None,
+            label_size: None,
+            label_color: None,
+        })
+    }
+
+    #[test]
+    fn default_config_has_no_recipes_or_bindings() {
+        let cfg = Config::default();
+        assert!(cfg.recipes.is_empty());
+        assert!(cfg.menu.slots.iter().all(|s| s.is_none()));
+    }
 
     #[test]
     fn migrate_moves_recipe_slots_to_menu() {
         let mut cfg = Config::default();
+        cfg.recipes = vec![recipe("a"), recipe("b")];
         // 旧格式：配方自带 slots，菜单无绑定 → 触发迁移。
         cfg.menu.slots = vec![];
         cfg.recipes[0].slots = vec![1, 3];
@@ -332,13 +306,22 @@ mod tests {
     #[test]
     fn migrate_skipped_when_menu_already_bound() {
         let mut cfg = Config::default();
-        // 菜单已有绑定（默认配置即如此）→ 不迁移，只清旧字段。
+        cfg.recipes = vec![recipe("a")];
+        // 菜单已有绑定 → 不迁移，只清旧字段。
+        cfg.menu.slots = vec![bound_slot(0)];
         let before = cfg.menu.slots.clone();
         cfg.recipes[0].slots = vec![5];
         migrate(&mut cfg);
         assert_eq!(
-            before.iter().map(|s| s.as_ref().and_then(|m| m.recipe)).collect::<Vec<_>>(),
-            cfg.menu.slots.iter().map(|s| s.as_ref().and_then(|m| m.recipe)).collect::<Vec<_>>()
+            before
+                .iter()
+                .map(|s| s.as_ref().and_then(|m| m.recipe))
+                .collect::<Vec<_>>(),
+            cfg.menu
+                .slots
+                .iter()
+                .map(|s| s.as_ref().and_then(|m| m.recipe))
+                .collect::<Vec<_>>()
         );
         assert!(cfg.recipes.iter().all(|r| r.slots.is_empty()));
     }
@@ -347,7 +330,28 @@ mod tests {
     /// 此处锁定序列化键名与步骤形态；改动本测试意味着需要同步前端类型。
     #[test]
     fn config_json_contract() {
+        // 默认配置为空：不自带配方，空菜单 slots 不序列化。
         let v = serde_json::to_value(Config::default()).unwrap();
+        assert_eq!(v["recipes"].as_array().unwrap().len(), 0);
+        assert!(v["menu"].get("slots").is_none());
+
+        // 手工构造一份含绑定与步骤的配置，锁定序列化键名与步骤形态。
+        let mut cfg = Config::default();
+        cfg.recipes.push(recipe("示例"));
+        cfg.recipes[0].steps = vec![
+            Step {
+                confirm: false,
+                kind: StepKind::Wait { ms: 50 },
+            },
+            Step {
+                confirm: false,
+                kind: StepKind::Hotkey {
+                    keys: "Ctrl+C".to_string(),
+                },
+            },
+        ];
+        cfg.menu.slots = vec![bound_slot(0)];
+        let v = serde_json::to_value(cfg).unwrap();
         assert!(v.get("globalHotkey").is_some());
         assert!(v.get("listHotkey").is_some());
         assert!(v.get("recipes").is_some());
@@ -357,12 +361,7 @@ mod tests {
         assert!(menu.get("sectors").is_some());
         assert!(menu.get("showLabels").is_some());
         assert!(menu.get("slots").is_some());
-
-        let menu_slot = menu["slots"].as_array().unwrap().iter().find_map(|s| {
-            let s = s.as_object()?;
-            s.get("recipe").map(|_| s)
-        });
-        assert!(menu_slot.is_some(), "默认菜单应至少有一个绑定扇区");
+        assert_eq!(menu["slots"][0]["recipe"], 0);
 
         let recipe = &v["recipes"][0];
         assert!(recipe.get("name").is_some());

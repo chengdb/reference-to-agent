@@ -158,9 +158,9 @@ export function normalizeStepFields(steps: EditableStep[]) {
 }
 
 /**
- * 新建配方时的初始步骤模板（前端唯一一份）。
- * 注意：首次安装时的默认配置由后端 src-tauri/src/config.rs 的
- * Config::default() 提供（结构相同）；此处仅服务于「+ 添加配方」。
+ * 新建配方时的初始步骤模板（前端唯一一份），仅服务于「+ 添加配方」。
+ * 注意：首次安装的默认配置（src-tauri/src/config.rs 的 Config::default()）
+ * 不含任何配方与菜单绑定，不再与本模板对应。
  */
 export function newRecipeTemplateSteps(): EditableStep[] {
   return [

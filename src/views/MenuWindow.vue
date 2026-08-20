@@ -15,8 +15,6 @@ const menu = ref<MenuConfig>({ size: 400, sectors: 8, showLabels: true, slots: [
 const ordered = computed<(MenuItem | null)[]>(() =>
   buildMenuItems(recipes.value, menu.value.sectors, menu.value.slots)
 );
-const count = computed(() => ordered.value.filter(Boolean).length);
-const extras = computed(() => Math.max(0, recipes.value.length - count.value));
 const closeSize = computed(() => 2 * Math.max(36, menu.value.size * 0.145));
 const closeIcon = computed(() => Math.round(closeSize.value * 0.2));
 
@@ -97,10 +95,6 @@ onUnmounted(() => {
     <button class="radial-close" title="Esc 关闭" :style="{ width: closeSize + 'px', height: closeSize + 'px' }" @click="close">
       <svg viewBox="0 0 24 24" :width="closeIcon" :height="closeIcon" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6L6 18M6 6l12 12" /></svg>
     </button>
-
-    <div v-if="extras > 0" class="radial-more">
-      还有 {{ extras }} 个配方未绑定到菜单扇区
-    </div>
   </div>
 </template>
 
@@ -138,15 +132,5 @@ onUnmounted(() => {
   color: var(--text-2);
   border-color: rgba(255, 255, 255, 0.8);
   transform: translate(-50%, -50%) scale(1.05);
-}
-
-.radial-more {
-  position: absolute;
-  bottom: 26px;
-  left: 50%;
-  transform: translateX(-50%);
-  color: var(--text-3);
-  font-size: 11px;
-  white-space: nowrap;
 }
 </style>
